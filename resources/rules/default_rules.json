@@ -1,0 +1,52 @@
+{
+  "rules": [
+    {
+      "id": "rule_cn_id",
+      "name": "身份证号",
+      "pattern": "\\d{17}[\\dXx]",
+      "type": "regex",
+      "risk_level": "high",
+      "scope": ["content", "filename"]
+    },
+    {
+      "id": "rule_cn_phone",
+      "name": "手机号",
+      "pattern": "1[3-9]\\d{9}",
+      "type": "regex",
+      "risk_level": "medium",
+      "scope": ["content", "filename"]
+    },
+    {
+      "id": "rule_bank_card",
+      "name": "银行卡号",
+      "pattern": "\\d{16,19}",
+      "type": "regex",
+      "risk_level": "high",
+      "scope": ["content"]
+    },
+    {
+      "id": "rule_secret_keyword",
+      "name": "机密关键词",
+      "pattern": "机密|绝密|内部资料|秘密|涉密|confidential|top secret",
+      "type": "keyword",
+      "risk_level": "critical",
+      "scope": ["content", "filename"]
+    },
+    {
+      "id": "rule_api_key",
+      "name": "API密钥",
+      "pattern": "(?i)(api[_-]?key|secret|token|password)\\s*[:=]\\s*['\"]?[A-Za-z0-9_-]{16,}",
+      "type": "regex",
+      "risk_level": "high",
+      "scope": ["content"]
+    },
+    {
+      "id": "rule_email",
+      "name": "电子邮箱",
+      "pattern": "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}",
+      "type": "regex",
+      "risk_level": "low",
+      "scope": ["content"]
+    }
+  ]
+}

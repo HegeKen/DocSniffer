@@ -1,0 +1,209 @@
+//! Index manager (Tantivy writer) and the custom CJK tokenizer.
+//!
+//! The tokenizer chops text into ASCII alphanumeric runs plus *each* CJK
+//! character as an individual unigram token. This provides usable Chinese
+//! search without pulling an external segmentation library.
+
+use crate::core::indexer::schema::{build_schema, Fields, TOKENIZER_ZH};
+use crate::core::scanner::FileEntry;
+use sha2::{Digest, Sha256};
+use std::path::Path;
+use std::sync::Mutex;
+use tantivy::query::{Query, QueryParser};
+use tantivy::schema::Schema;
+use tantivy::tokenizer::{BoxTokenStream, Token, TokenStream, Tokenizer};
+use tantivy::{Index, IndexReader, IndexWriter, TantivyDocument};
+
+/// A unigram, CJK-aware tokenizer (see module docs).
+#[derive(Clone, Default)]
+pub struct CjkTokenizer;
+
+impl Tokenizer for CjkTokenizer {
+    type TokenStream<'a> = BoxTokenStream<'a>;
+
+    fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
+        BoxTokenStream::new(CjkTokenStream {
+            tokens: tokenize_cjk(text),
+            idx: 0,
+        })
+    }
+}
+
+struct CjkTokenStream {
+    tokens: Vec<Token>,
+    idx: usize,
+}
+
+impl TokenStream for CjkTokenStream {
+    fn advance(&mut self) -> bool {
+        if self.idx < self.tokens.len() {
+            self.idx += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn token(&self) -> &Token {
+        &self.tokens[self.idx - 1]
+    }
+
+    fn token_mut(&mut self) -> &mut Token {
+        &mut self.tokens[self.idx - 1]
+    }
+}
+
+/// Produce a token vector: runs of ASCII alphanumerics, and each non-ASCII
+/// ideographic character as a separate token.
+fn tokenize_cjk(text: &str) -> Vec<Token> {
+    let mut tokens = Vec::new();
+    let mut position = 0usize;
+    let mut i = 0usize;
+    let bytes = text.as_bytes();
+
+    while i < bytes.len() {
+        let ch = text[i..].chars().next().unwrap();
+        let len = ch.len_utf8();
+
+        if ch.is_ascii_alphanumeric() {
+            let start = i;
+            let mut j = i + len;
+            while j < bytes.len() {
+                let c2 = text[j..].chars().next().unwrap();
+                if c2.is_ascii_alphanumeric() {
+                    j += c2.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            tokens.push(Token {
+                offset_from: start,
+                offset_to: j,
+                position,
+                position_length: 1,
+                text: text[start..j].to_lowercase(),
+            });
+            position += 1;
+            i = j;
+        } else if (ch as u32) >= 0x2e80 && !ch.is_whitespace() {
+            tokens.push(Token {
+                offset_from: i,
+                offset_to: i + len,
+                position,
+                position_length: 1,
+                text: ch.to_lowercase().to_string(),
+            });
+            position += 1;
+            i += len;
+        } else {
+            i += len;
+        }
+    }
+    tokens
+}
+
+/// A stable document id derived from the file path (used for dedup / deletes).
+pub fn id_of(path: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(path.as_bytes());
+    let digest = hasher.finalize();
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Owns the Tantivy index, its writer and the schema/field handles.
+pub struct IndexManager {
+    pub index: Index,
+    pub writer: Mutex<IndexWriter>,
+    pub fields: Fields,
+    pub schema: Schema,
+}
+
+impl IndexManager {
+    /// Open (or create) an index living in `index_dir` and register the custom
+    /// tokenizer. Tokenizers are not persisted, so they must be re-registered
+    /// on every open.
+    pub fn open(index_dir: &Path) -> tantivy::Result<Self> {
+        std::fs::create_dir_all(index_dir)?;
+        let (schema, fields) = build_schema();
+
+        let index = if index_dir.join("meta.json").exists() {
+            Index::open_in_dir(index_dir)?
+        } else {
+            Index::create_in_dir(index_dir, schema.clone())?
+        };
+        index.tokenizers().register(TOKENIZER_ZH, CjkTokenizer);
+
+        let writer = index.writer(150_000_000)?;
+        Ok(Self {
+            index,
+            writer: Mutex::new(writer),
+            fields,
+            schema,
+        })
+    }
+
+    pub fn reader(&self) -> tantivy::Result<IndexReader> {
+        self.index.reader()
+    }
+
+    /// Add one file to the index, with optional extracted text content.
+    /// `content: None` simply means the file has no searchable text.
+    pub fn add_file(&self, fe: &FileEntry, content: Option<String>) -> tantivy::Result<()> {
+        let id = id_of(&fe.path);
+        let mut doc = TantivyDocument::new();
+        doc.add_text(self.fields.id, id);
+        doc.add_text(self.fields.path, fe.path.clone());
+        doc.add_text(self.fields.name, fe.name.clone());
+        if let Some(text) = content {
+            doc.add_text(self.fields.content, text);
+        }
+        doc.add_text(self.fields.ext, fe.ext.clone());
+        doc.add_u64(self.fields.size, fe.size);
+        doc.add_u64(self.fields.mtime, fe.mtime);
+
+        let w = self.writer.lock().unwrap();
+        w.add_document(doc).map(|_| ())
+    }
+
+    /// Delete a previously indexed file by `id` (path hash) and re-add it.
+    /// Used by the file watcher for incremental updates.
+    pub fn upsert_file(&self, fe: &FileEntry, content: Option<String>) -> tantivy::Result<()> {
+        let id = id_of(&fe.path);
+        {
+            let w = self.writer.lock().unwrap();
+            let term = tantivy::Term::from_field_text(self.fields.id, &id);
+            w.delete_term(term);
+        }
+        self.add_file(fe, content)
+    }
+
+    pub fn delete_by_path(&self, path: &str) -> tantivy::Result<()> {
+        let id = id_of(path);
+        let term = tantivy::Term::from_field_text(self.fields.id, &id);
+        let w = self.writer.lock().unwrap();
+        w.delete_term(term);
+        Ok(())
+    }
+
+    pub fn commit(&self) -> tantivy::Result<()> {
+        let mut w = self.writer.lock().unwrap();
+        w.commit().map(|_| ())
+    }
+
+    /// Remove every document and compact the index.
+    pub fn clear(&self) -> tantivy::Result<()> {
+        let mut w = self.writer.lock().unwrap();
+        w.delete_all_documents()?;
+        w.commit()?;
+        Ok(())
+    }
+
+    /// Build a `QueryParser` over the text fields.
+    pub fn parse_query(&self, q: &str) -> tantivy::Result<Box<dyn Query>> {
+        let parser = QueryParser::for_index(
+            &self.index,
+            vec![self.fields.name, self.fields.content, self.fields.path],
+        );
+        parser.parse_query(q).map_err(Into::into)
+    }
+}

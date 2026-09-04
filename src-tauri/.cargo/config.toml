@@ -1,0 +1,4 @@
+# Compile release builds as fully static binaries on Windows to avoid
+# runtime dependency on the VC++ redistributable (green / portable packaging).
+[target.'cfg(target_os = "windows")']
+rustflags = ["-C", "target-feature=+crt-static"]

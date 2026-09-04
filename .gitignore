@@ -1,0 +1,18 @@
+# Node
+node_modules/
+dist/
+
+# Rust
+src-tauri/target/
+
+# Tauri
+src-tauri/gen/
+
+# Index / runtime data (portable mode)
+src-tauri/Data/
+
+# OS / IDE
+.DS_Store
+*.log
+.idea/
+.vscode/
