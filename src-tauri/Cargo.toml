@@ -49,6 +49,7 @@ percent-encoding = "2"
 
 # Embed default resources (default_rules.json)
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+office_oxide = "0.1.9"
 
 [profile.release]
 codegen-units = 1

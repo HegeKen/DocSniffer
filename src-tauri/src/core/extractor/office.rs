@@ -37,7 +37,44 @@ pub fn read_pptx(path: &Path) -> Option<String> {
     clean(chunks.join("\n"))
 }
 
-/// Extract text from an XLSX/XLSM (Excel) workbook via `calamine`.
+/// Extract text from a legacy WPS Writer document (`.wps`).
+///
+/// WPS `.wps` files are OLE CFB compound documents laid out like classic Word
+/// `.doc` (a `WordDocument` stream plus a CLX piece table), but carry the
+/// `.wps` extension that `office_oxide`'s extension-based detection does not
+/// recognise. We therefore open them with an explicit `DocumentFormat::Doc`.
+pub fn read_wps(path: &Path) -> Option<String> {
+    let file = std::fs::File::open(path).ok()?;
+    let doc =
+        office_oxide::Document::from_reader(file, office_oxide::DocumentFormat::Doc).ok()?;
+    let text = doc.plain_text();
+    if text.trim().is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+/// Extract text from a legacy WPS Presentation document (`.dps`).
+///
+/// WPS `.dps` files are OLE CFB compound documents laid out like classic
+/// PowerPoint `.ppt`; they are opened explicitly as `DocumentFormat::Ppt`
+/// because the `.dps` extension is not in `office_oxide`'s extension table.
+pub fn read_dps(path: &Path) -> Option<String> {
+    let file = std::fs::File::open(path).ok()?;
+    let doc =
+        office_oxide::Document::from_reader(file, office_oxide::DocumentFormat::Ppt).ok()?;
+    let text = doc.plain_text();
+    if text.trim().is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+/// Extract text from an Excel/WPS-spreadsheet workbook (XLSX/XLSM/ET) via
+/// `calamine`. `open_workbook_auto` probes Xls/Xlsx/Xlsb/Ods readers in turn
+/// when the `.et` extension is not in its known list.
 pub fn read_xlsx(path: &Path) -> Option<String> {
     let mut workbook = calamine::open_workbook_auto(path).ok()?;
     let sheets = workbook.sheet_names().to_vec();

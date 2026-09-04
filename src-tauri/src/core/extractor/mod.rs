@@ -34,7 +34,14 @@ pub fn extract_text(path: &Path) -> Option<String> {
 
         // Office documents
         "docx" | "word" => office::read_docx(path),
-        "xlsx" | "xlsm" => office::read_xlsx(path),
+        // WPS Writer (.wps) and WPS Presentation (.dps) are legacy OLE CFB
+        // documents; office_oxide opens them with an explicit legacy format
+        // because the `.wps`/`.dps` extensions are not in its detection table.
+        "wps" => office::read_wps(path),
+        "dps" => office::read_dps(path),
+        // WPS Spreadsheets (.et) are BIFF-compatible; `open_workbook_auto`
+        // probes Xls/Xlsx readers when the extension is not in its known list.
+        "xlsx" | "xlsm" | "et" => office::read_xlsx(path),
         "pptx" => office::read_pptx(path),
 
         // PDF

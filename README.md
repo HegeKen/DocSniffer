@@ -6,7 +6,7 @@ DocSniffer 是一款跨平台（Windows / macOS / Linux）的 **本地文件搜�
 
 - **目录扫描**：递归遍历指定目录，实时反馈扫描进度（已处理数 / 总数 / 当前路径）。
 - **全文索引**：对文件路径、文件名、文件内容建立 Tantivy 索引，按 BM25 相关性排序。
-- **内容提取**：支持多种纯文本 / 代码文件、Office（DOCX / XLSX / PPTX）与 PDF 的文本提取；纯文本自动识别编码（含 GBK 等历史中文编码）。
+- **内容提取**：支持多种纯文本 / 代码文件、Office（DOCX / XLSX / PPTX / WPS `.et`）与 PDF 的文本提取；纯文本自动识别编码（含 GBK 等历史中文编码）。
 - **快速搜索**：支持文件名 / 路径 / 内容检索，含高级查询语法（`path:`、`ext:`、`size:`、`mtime:`、`-term`、`OR`、引号短语）。
 - **规则检测**：内置若干默认规则（正则 / 关键词），支持在界面上增删改并持久化，对文件名和 / 或文件内容进行匹配，输出命中报告。
 - **增量更新**：文件监控模块（`notify`）实时监听目录变化，对发生变更的文件做增量重索引（1s 防抖），避免反复全盘扫描。
@@ -22,7 +22,7 @@ DocSniffer 是一款跨平台（Windows / macOS / Linux）的 **本地文件搜�
 | 前端框架 | React 18 + TypeScript + Vite 5 |
 | 文件遍历 | `walkdir` |
 | 文件监控 | `notify` |
-| 内容提取 | `pdf-extract`（PDF）、`calamine`（XLSX）、`zip` + 自研清理（DOCX / PPTX）、`chardetng`（编码检测） |
+| 内容提取 | `pdf-extract`（PDF）、`calamine`（XLSX / WPS `.et`）、`office_oxide`（WPS `.wps` / `.dps`  OLE）、`zip` + 自研清理（DOCX / PPTX）、`chardetng`（编码检测） |
 | 存储 | 轻量 JSON 键值存储（无第三方原生依赖） |
 
 ## 系统架构
