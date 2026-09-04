@@ -1,6 +1,5 @@
 # Node
 node_modules/
-dist/
 
 # Rust
 src-tauri/target/
@@ -10,6 +9,12 @@ src-tauri/gen/
 
 # Index / runtime data (portable mode)
 src-tauri/Data/
+
+# Frontend build output (embedded into release binaries via rust-embed).
+# The folder itself must exist for `cargo build` (rust-embed), so only the
+# generated content is ignored and a .gitkeep placeholder is tracked.
+dist/*
+!dist/.gitkeep
 
 # OS / IDE
 .DS_Store

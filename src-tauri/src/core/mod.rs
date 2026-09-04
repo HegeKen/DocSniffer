@@ -9,6 +9,7 @@ pub mod indexer;
 pub mod scanner;
 pub mod searcher;
 pub mod sensitive;
+pub mod state;
 pub mod storage;
 pub mod watcher;
 

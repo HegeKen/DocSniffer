@@ -1,14 +1,20 @@
 //! DocSniffer library entry-point.
 //!
-//! Registers the shared application state and all Tauri commands on the builder.
+//! Two front-ends share the same core:
+//! - the Tauri 2 desktop app (`run`, requires the `tauri-app` feature), and
+//! - the headless HTTP server (`server`, used for the Windows 7 build).
 
-pub mod commands;
 pub mod core;
+pub mod server;
 
-use commands::AppState;
+#[cfg(feature = "tauri-app")]
+pub mod commands;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg(feature = "tauri-app")]
 pub fn run() {
+    use commands::AppState;
+
     let state = AppState::new().expect("failed to initialize DocSniffer app state");
 
     tauri::Builder::default()
