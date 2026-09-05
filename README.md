@@ -131,14 +131,13 @@ docsniffer-server.exe --open          :: 启动后自动打开默认浏览器
 
 ### 面向 Windows 7 构建
 
-在任意装有 **VS Build Tools（MSVC 链接器）的 Windows 10/11 机器**上交叉构建，产物拷贝到 Win7 直接运行：
+在任意装有 **VS Build Tools 2019 或更新版本（MSVC 链接器）的 Windows 10/11 机器**上构建，产物拷贝到 Win7 直接运行：
 
 ```bash
 rustup toolchain install nightly
 
 cd src-tauri
-cargo +nightly build --release --no-default-features --bin docsniffer-server \
-      -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc
+cargo +nightly build --release --no-default-features --bin docsniffer-server -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc
 # 产物：src-tauri/target/x86_64-win7-windows-msvc/release/docsniffer-server.exe
 ```
 
@@ -146,9 +145,11 @@ cargo +nightly build --release --no-default-features --bin docsniffer-server \
 
 - `x86_64-win7-windows-msvc` 是 Rust 的 Tier-3 目标，std 以 Win7 为最低系统编译，需 nightly + `-Z build-std`（详见 [rustc 平台支持文档](https://doc.rust-lang.org/rustc/platform-support/win7-windows-msvc.html)）。
 - `--no-default-features` 关闭 `tauri-app` feature：不编译 Tauri / WebView 层，这正是 Win7 兼容的关键。
+- 务必带上 `--bin docsniffer-server`，只构建所需目标，避免多余的库产物链接。
 - 仓库的 `.cargo/config.toml` 已对所有 Windows 目标启用 `+crt-static`，产物为静态链接单文件，**Win7 无需安装 UCRT / VC++ 运行库**。
 - 如需 32 位 Win7，将目标换为 `i686-win7-windows-msvc` 即可。
 - 构建 `docsniffer-server` 前需先执行一次 `pnpm build`（release 构建会把 `dist/` 前端产物嵌入二进制）。
+- 若遇到 `LNK1181: 无法打开输入文件 windows.0.XX.lib` 一类链接错误：先 `cargo clean` 后重试；本项目已通过 `dirs 6` / `notify 7` 排除了依赖树中的老版 `windows-sys 0.48`（其导入库在 build-std 下容易丢链接搜索路径），若自行新增依赖请避免引入 `windows-sys 0.48`。
 
 ### 常见问题
 
