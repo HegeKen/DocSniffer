@@ -7,5 +7,5 @@
 pub mod schema;
 pub mod writer;
 
-pub use schema::{build_schema, Fields, FIELD_CONTENT, FIELD_EXT, FIELD_ID, FIELD_MTIME, FIELD_NAME, FIELD_PATH, FIELD_SIZE};
+pub use schema::{build_schema, Fields, FIELD_BATCH_ID, FIELD_CONTENT, FIELD_EXT, FIELD_ID, FIELD_MTIME, FIELD_NAME, FIELD_PATH, FIELD_SIZE};
 pub use writer::{id_of, IndexManager};

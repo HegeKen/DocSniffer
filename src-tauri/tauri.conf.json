@@ -3,6 +3,7 @@
   "productName": "DocSniffer",
   "version": "0.1.0",
   "identifier": "com.sec.docsniffer",
+  "mainBinaryName": "docsniffer",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",

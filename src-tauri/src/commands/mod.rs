@@ -10,6 +10,8 @@ pub mod sensitive;
 pub use crate::core::state::AppState;
 
 /// The command names, re-exported for `generate_handler!` in `lib.rs`.
-pub use scan::{index_status, scan_directory};
+pub use scan::{
+    clear_all_index, delete_batch, index_status, list_batches, scan_directory, update_batch,
+};
 pub use search::search_files;
 pub use sensitive::{get_rules, save_rules, sensitive_scan};

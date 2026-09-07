@@ -11,7 +11,10 @@ use crate::core::extractor::extract_text;
 use crate::core::indexer::{Fields, IndexManager};
 use serde::Serialize;
 use std::path::Path;
-use tantivy::schema::Value;
+use tantivy::collector::TopDocs;
+use tantivy::query::{BooleanQuery, Occur, Query, TermQuery};
+use tantivy::schema::{IndexRecordOption, Value};
+use tantivy::Term;
 
 /// A single search hit returned to the front-end.
 #[derive(Debug, Clone, Serialize)]
@@ -26,20 +29,37 @@ pub struct SearchResult {
     pub snippet: String,
 }
 
-/// Run a search over the whole index and return the top `limit` results,
-/// ranked by BM25 relevance.
+/// Run a search and return the top `limit` results, ranked by BM25 relevance.
+///
+/// When `batch_id` is given, the results are restricted to documents belonging
+/// to that import batch (the search query is ANDed with a batch_id term). Pass
+/// `None` (or an empty string) to search across the whole index.
 pub fn search(
     indexmgr: &IndexManager,
     raw_query: &str,
     limit: usize,
+    batch_id: Option<&str>,
 ) -> tantivy::Result<Vec<SearchResult>> {
     // Rewrite human-friendly size/date filters into Tantivy-syntax first.
     let pre = parser::preprocess(raw_query);
-    let query = indexmgr.parse_query(&pre)?;
+    let parsed = indexmgr.parse_query(&pre)?;
+
+    let query: Box<dyn Query> = match batch_id {
+        Some(bid) if !bid.is_empty() => {
+            let term = Term::from_field_text(indexmgr.fields.batch_id, bid);
+            let batch_q: Box<dyn Query> =
+                Box::new(TermQuery::new(term, IndexRecordOption::Basic));
+            Box::new(BooleanQuery::new(vec![
+                (Occur::Must, parsed),
+                (Occur::Must, batch_q),
+            ]))
+        }
+        _ => parsed,
+    };
 
     let reader = indexmgr.reader()?;
     let searcher = reader.searcher();
-    let top_docs = searcher.search(&query, &tantivy::collector::TopDocs::with_limit(limit))?;
+    let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
 
     let highlight = extract_highlight_terms(raw_query);
     let mut results = Vec::with_capacity(top_docs.len());

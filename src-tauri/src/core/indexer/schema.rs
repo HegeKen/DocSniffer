@@ -6,6 +6,7 @@ pub const FIELD_CONTENT: &str = "content";
 pub const FIELD_EXT: &str = "ext";
 pub const FIELD_SIZE: &str = "size";
 pub const FIELD_MTIME: &str = "mtime";
+pub const FIELD_BATCH_ID: &str = "batch_id";
 
 /// Name of the custom CJK-aware tokenizer registered on the index.
 pub const TOKENIZER_ZH: &str = "zh";
@@ -20,6 +21,7 @@ pub struct Fields {
     pub ext: Field,
     pub size: Field,
     pub mtime: Field,
+    pub batch_id: Field,
 }
 
 use tantivy::schema::{
@@ -89,6 +91,19 @@ pub fn build_schema() -> (Schema, Fields) {
         FIELD_MTIME,
         NumericOptions::default().set_indexed().set_stored().set_fast(),
     );
+    // `batch_id` is a raw (un-tokenized) stored field, so it can be used both
+    // as a delete_term target for batch-level deletes and to count documents
+    // per import batch.
+    let batch_id = b.add_text_field(
+        FIELD_BATCH_ID,
+        TextOptions::default()
+            .set_indexing_options(
+                TextFieldIndexing::default()
+                    .set_tokenizer("raw")
+                    .set_index_option(IndexRecordOption::Basic),
+            )
+            .set_stored(),
+    );
 
     let schema = b.build();
     (
@@ -101,6 +116,7 @@ pub fn build_schema() -> (Schema, Fields) {
             ext,
             size,
             mtime,
+            batch_id,
         },
     )
 }

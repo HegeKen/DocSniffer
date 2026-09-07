@@ -22,6 +22,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::scan::scan_directory,
             commands::scan::index_status,
+            commands::scan::list_batches,
+            commands::scan::delete_batch,
+            commands::scan::clear_all_index,
+            commands::scan::update_batch,
             commands::search::search_files,
             commands::sensitive::get_rules,
             commands::sensitive::save_rules,

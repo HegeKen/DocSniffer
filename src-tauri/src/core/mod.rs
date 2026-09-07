@@ -4,6 +4,7 @@
 //! the project README (scanner / extractor / indexer / searcher / watcher /
 //! sensitive / storage).
 
+pub mod batch;
 pub mod extractor;
 pub mod indexer;
 pub mod scanner;

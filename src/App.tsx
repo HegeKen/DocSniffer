@@ -9,10 +9,11 @@ import SearchBar from "./components/SearchBar";
 import ResultList from "./components/ResultList";
 import ScanControl from "./components/ScanControl";
 import RuleManager from "./components/RuleManager";
+import BatchManager from "./components/BatchManager";
 import { SearchResult } from "./lib/api";
 import { searchFiles } from "./lib/api";
 
-type Tab = "search" | "scan" | "rules";
+type Tab = "search" | "scan" | "rules" | "index";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("search");
@@ -38,11 +39,11 @@ export default function App() {
     };
   }, [refreshStatus]);
 
-  const runSearch = async (query: string) => {
+  const runSearch = async (query: string, batchId: string) => {
     setBusy(true);
     setLastQuery(query);
     try {
-      const r = await searchFiles(query);
+      const r = await searchFiles(query, 200, batchId || undefined);
       setResults(r);
     } catch (e) {
       console.error("search failed", e);
@@ -76,6 +77,7 @@ export default function App() {
             ["search", "搜索"],
             ["scan", "扫描"],
             ["rules", "敏感检测"],
+            ["index", "索引管理"],
           ] as [Tab, string][]
         ).map(([k, label]) => (
           <button
@@ -99,6 +101,7 @@ export default function App() {
           <ScanControl progress={progress} onDone={refreshStatus} />
         )}
         {tab === "rules" && <RuleManager />}
+        {tab === "index" && <BatchManager onChanged={refreshStatus} />}
       </main>
     </div>
   );

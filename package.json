@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "build:win7": "pnpm build && powershell -ExecutionPolicy Bypass -File scripts\\build-win7.ps1"
+    "build:win7": "pnpm build && powershell -ExecutionPolicy Bypass -File scripts\\build-win7.ps1",
+    "build:fresh": "cd src-tauri && cargo clean && cd .. && pnpm build && pnpm tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

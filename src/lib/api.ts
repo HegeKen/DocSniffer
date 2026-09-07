@@ -25,6 +25,14 @@ export interface IndexStatus {
   data_dir: string;
 }
 
+export interface BatchItem {
+  id: string;
+  name: string;
+  path: string;
+  created_at: number;
+  documents: number;
+}
+
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
 export interface Rule {
@@ -87,20 +95,32 @@ const httpPost = <T,>(url: string, body?: unknown) => httpJson<T>("POST", url, b
 
 // ---- Commands ----
 
-export const scanDirectory = (path: string, includeContent: boolean): Promise<number> =>
+export const scanDirectory = (
+  path: string,
+  includeContent: boolean,
+  batchName?: string,
+): Promise<number> =>
   inTauri()
-    ? invoke<number>("scan_directory", { path, includeContent })
-    : startScanHttp(path, includeContent);
+    ? invoke<number>("scan_directory", { path, includeContent, batchName })
+    : startScanHttp(path, includeContent, batchName);
 
 export const indexStatus = (): Promise<IndexStatus> =>
   inTauri()
     ? invoke<IndexStatus>("index_status")
     : httpGet<IndexStatus>("/api/index_status");
 
-export const searchFiles = (query: string, limit?: number): Promise<SearchResult[]> =>
+export const searchFiles = (
+  query: string,
+  limit?: number,
+  batchId?: string,
+): Promise<SearchResult[]> =>
   inTauri()
-    ? invoke<SearchResult[]>("search_files", { query, limit: limit ?? 200 })
-    : httpPost<SearchResult[]>("/api/search_files", { query, limit: limit ?? 200 });
+    ? invoke<SearchResult[]>("search_files", { query, limit: limit ?? 200, batchId })
+    : httpPost<SearchResult[]>("/api/search_files", {
+        query,
+        limit: limit ?? 200,
+        batch_id: batchId,
+      });
 
 export const getRules = (): Promise<Rule[]> =>
   inTauri() ? invoke<Rule[]>("get_rules") : httpGet<Rule[]>("/api/rules");
@@ -122,6 +142,24 @@ export const sensitiveScan = (
         include_content: includeContent,
         active_rules: activeRules,
       });
+
+export const listBatches = (): Promise<BatchItem[]> =>
+  inTauri() ? invoke<BatchItem[]>("list_batches") : httpGet<BatchItem[]>("/api/batches");
+
+export const deleteBatch = (batchId: string): Promise<number> =>
+  inTauri()
+    ? invoke<number>("delete_batch", { batchId })
+    : httpPost<number>("/api/delete_batch", { batch_id: batchId });
+
+export const clearAllIndex = (): Promise<void> =>
+  inTauri()
+    ? invoke<void>("clear_all_index")
+    : httpPost<{ cleared: boolean }>("/api/clear_all_index").then(() => undefined);
+
+export const updateBatch = (batchId: string): Promise<number> =>
+  inTauri()
+    ? invoke<number>("update_batch", { batchId })
+    : httpPost<number>("/api/update_batch", { batch_id: batchId });
 
 // ---- Events ----
 
@@ -151,8 +189,16 @@ interface ScanStatusHttp {
 
 const SCAN_POLL_MS = 300;
 
-async function startScanHttp(path: string, includeContent: boolean): Promise<number> {
-  await httpPost("/api/scan_directory", { path, include_content: includeContent });
+async function startScanHttp(
+  path: string,
+  includeContent: boolean,
+  batchName?: string,
+): Promise<number> {
+  await httpPost("/api/scan_directory", {
+    path,
+    include_content: includeContent,
+    batch_name: batchName,
+  });
 
   // Poll the job until it finishes, forwarding progress to subscribers (the
   // same callbacks that Tauri feeds with "scan-progress" events).

@@ -8,6 +8,7 @@ interface Props {
 
 export default function ScanControl({ progress, onDone }: Props) {
   const [path, setPath] = useState("");
+  const [batchName, setBatchName] = useState("");
   const [includeContent, setIncludeContent] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -22,7 +23,7 @@ export default function ScanControl({ progress, onDone }: Props) {
     setError("");
     setMessage("");
     try {
-      const count = await scanDirectory(path.trim(), includeContent);
+      const count = await scanDirectory(path.trim(), includeContent, batchName.trim() || undefined);
       setMessage(`扫描完成，共索引 ${count} 个文件。`);
       onDone();
     } catch (e) {
@@ -46,6 +47,14 @@ export default function ScanControl({ progress, onDone }: Props) {
           placeholder="输入要扫描的目录，例如 /Users/me/Documents"
           value={path}
           onChange={(e) => setPath(e.target.value)}
+        />
+      </div>
+      <div className="form-row">
+        <input
+          className="search-input"
+          placeholder="批次名称（可选，留空则自动生成）"
+          value={batchName}
+          onChange={(e) => setBatchName(e.target.value)}
         />
       </div>
       <div className="form-row inline">

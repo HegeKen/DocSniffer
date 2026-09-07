@@ -3,6 +3,7 @@
 //! Mirrors the Tauri command layer (`commands/`) 1:1 so both front-ends expose
 //! identical functionality; only the transport differs (IPC vs. local HTTP).
 
+use crate::core::batch::{self, BatchInfo};
 use crate::core::extractor::extract_text;
 use crate::core::scanner::{collect_files, ScanOptions};
 use crate::core::searcher as searcher;
@@ -86,12 +87,15 @@ struct ScanReq {
     path: String,
     #[serde(default = "default_true")]
     include_content: bool,
+    #[serde(default)]
+    batch_name: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct SearchReq {
     query: String,
     limit: Option<usize>,
+    batch_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -106,6 +110,16 @@ struct SensitiveReq {
     active_rules: Option<Vec<Rule>>,
 }
 
+#[derive(Deserialize)]
+struct DeleteBatchReq {
+    batch_id: String,
+}
+
+#[derive(Deserialize)]
+struct UpdateBatchReq {
+    batch_id: String,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -116,6 +130,10 @@ pub fn handle(ctx: &ServerContext, method: &Method, path: &str, body: &[u8]) -> 
         (Method::Get, "/api/index_status") => index_status(ctx),
         (Method::Post, "/api/scan_directory") => start_scan(ctx, body),
         (Method::Get, "/api/scan_status") => scan_status(ctx),
+        (Method::Get, "/api/batches") => list_batches(ctx),
+        (Method::Post, "/api/delete_batch") => delete_batch(ctx, body),
+        (Method::Post, "/api/update_batch") => update_batch(ctx, body),
+        (Method::Post, "/api/clear_all_index") => clear_all_index(ctx),
         (Method::Post, "/api/search_files") => search_files(ctx, body),
         (Method::Get, "/api/rules") => (200, json!(sensitive::load_rules(&ctx.app.store))),
         (Method::Post, "/api/rules") => save_rules(ctx, body),
@@ -164,8 +182,20 @@ fn start_scan(ctx: &ServerContext, body: &[u8]) -> (u16, Value) {
         return err(400, format!("不是有效目录: {}", req.path));
     }
 
+    // Create (and persist) a new import batch for this scan.
+    let batch_id = batch::new_id();
+    let batch_info = BatchInfo {
+        id: batch_id.clone(),
+        name: req.batch_name.unwrap_or_else(|| batch::default_name(&req.path)),
+        path: req.path.clone(),
+        created_at: batch::now_millis(),
+    };
+    if let Err(e) = batch::add(&ctx.app.store, batch_info) {
+        return err(500, e);
+    }
+
     ctx.scan.begin(&req.path);
-    let index = ctx.app.index.clone();
+    let app = ctx.app.clone();
     let job = ctx.scan.clone();
     let root = req.path;
     let include_content = req.include_content;
@@ -182,14 +212,18 @@ fn start_scan(ctx: &ServerContext, body: &[u8]) -> (u16, Value) {
             } else {
                 None
             };
-            let _ = index.add_file(fe, content);
+            let _ = app.index.add_file(fe, content, &batch_id);
             indexed += 1;
             job.set_progress(indexed, &fe.path);
         }
-        let outcome = match index.commit() {
+        let outcome = match app.index.commit() {
             Ok(()) => ScanOutcome::Ok(indexed as i64),
             Err(e) => ScanOutcome::Err(e.to_string()),
         };
+        // If the scan failed, drop the (now empty) batch metadata.
+        if let ScanOutcome::Err(_) = &outcome {
+            let _ = batch::remove(&app.store, &batch_id);
+        }
         job.finish(outcome);
     });
 
@@ -211,13 +245,86 @@ fn scan_status(ctx: &ServerContext) -> (u16, Value) {
     )
 }
 
+fn list_batches(ctx: &ServerContext) -> (u16, Value) {
+    let batches = batch::load_all(&ctx.app.store);
+    let mut out = Vec::with_capacity(batches.len());
+    for b in batches {
+        let documents = ctx.app.index.count_by_batch(&b.id).unwrap_or(0);
+        out.push(json!({
+            "id": b.id,
+            "name": b.name,
+            "path": b.path,
+            "created_at": b.created_at,
+            "documents": documents,
+        }));
+    }
+    ok(200, json!(out))
+}
+
+fn delete_batch(ctx: &ServerContext, body: &[u8]) -> (u16, Value) {
+    let req: DeleteBatchReq = match parse(body) {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    let count = ctx.app.index.count_by_batch(&req.batch_id).unwrap_or(0);
+    if let Err(e) = ctx
+        .app
+        .index
+        .delete_by_batch(&req.batch_id)
+        .and_then(|_| ctx.app.index.commit())
+    {
+        return err(500, e.to_string());
+    }
+    batch::remove(&ctx.app.store, &req.batch_id);
+    ok(200, json!(count))
+}
+
+fn clear_all_index(ctx: &ServerContext) -> (u16, Value) {
+    if let Err(e) = ctx.app.index.clear() {
+        return err(500, e.to_string());
+    }
+    batch::clear(&ctx.app.store);
+    ok(200, json!({ "cleared": true }))
+}
+
+/// Re-scan an import batch's directory, re-indexing changed/new files and
+/// dropping files that were removed from disk. Returns the new index count.
+fn update_batch(ctx: &ServerContext, body: &[u8]) -> (u16, Value) {
+    let req: UpdateBatchReq = match parse(body) {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    let batch = match batch::get(&ctx.app.store, &req.batch_id) {
+        Some(b) => b,
+        None => return err(404, "批次不存在"),
+    };
+    if !Path::new(&batch.path).is_dir() {
+        return err(400, format!("目录不存在: {}", batch.path));
+    }
+
+    let files = collect_files(Path::new(&batch.path), &ScanOptions::default());
+    let op = || -> tantivy::Result<i64> {
+        ctx.app.index.delete_by_batch(&req.batch_id)?;
+        for fe in &files {
+            let content = extract_text(Path::new(&fe.path));
+            let _ = ctx.app.index.add_file(fe, content, &req.batch_id);
+        }
+        let _ = ctx.app.index.commit();
+        Ok(files.len() as i64)
+    };
+    match op() {
+        Ok(count) => ok(200, json!(count)),
+        Err(e) => err(500, e.to_string()),
+    }
+}
+
 fn search_files(ctx: &ServerContext, body: &[u8]) -> (u16, Value) {
     let req: SearchReq = match parse(body) {
         Ok(r) => r,
         Err(e) => return e,
     };
     let limit = req.limit.unwrap_or(200);
-    match searcher::search(&ctx.app.index, &req.query, limit) {
+    match searcher::search(&ctx.app.index, &req.query, limit, req.batch_id.as_deref()) {
         Ok(results) => ok(200, serde_json::to_value(results).unwrap_or(json!([]))),
         Err(e) => err(400, e.to_string()),
     }

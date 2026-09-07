@@ -104,6 +104,13 @@ body {
   margin-bottom: 16px;
 }
 
+.search-bar .batch-select {
+  flex: 0 0 auto;
+  width: 240px;
+  cursor: pointer;
+  max-width: 45%;
+}
+
 .search-input {
   flex: 1;
   padding: 10px 14px;
