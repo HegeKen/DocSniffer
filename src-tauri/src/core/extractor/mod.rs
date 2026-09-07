@@ -9,7 +9,6 @@
 pub mod office;
 pub mod text;
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 
 /// Extract searchable plain text from `path` based on its extension.
@@ -18,12 +17,16 @@ use std::path::Path;
 /// caller simply indexes the file without a content field in that case.
 pub fn extract_text(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?.to_lowercase();
-    // Extraction crates (pdf-extract, calamine, zip/quick-xml) may panic on
-    // malformed or unsupported documents — e.g. PDFs with a CJK
-    // `UniGB-UCS2-H` CMap. A panic escaping into an indexer/scanner worker
-    // thread would abort the whole process, so contain it here and treat the
-    // file as non-indexable instead.
-    match catch_unwind(AssertUnwindSafe(|| match ext.as_str() {
+
+    // Extraction crates may panic on malformed / legacy / encoding-heavy docs
+    // (e.g. PDFs with a `UniGB-UCS2-H` CMap or damaged XLS files). The panic
+    // must be contained at the extraction boundary so it is treated as a
+    // non-indexable file instead of crashing the process.
+    fn safe_extract<T>(f: impl FnOnce() -> Option<T>) -> Option<T> {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).ok().flatten()
+    }
+
+    safe_extract(|| match ext.as_str() {
         // Text & source-code families
         "txt" | "md" | "markdown" | "csv" | "log" | "json" | "xml" | "html" | "htm"
         | "shtml" | "yml" | "yaml" | "toml" | "ini" | "conf" | "cfg" | "properties"
@@ -34,13 +37,8 @@ pub fn extract_text(path: &Path) -> Option<String> {
 
         // Office documents
         "docx" | "word" => office::read_docx(path),
-        // WPS Writer (.wps) and WPS Presentation (.dps) are legacy OLE CFB
-        // documents; office_oxide opens them with an explicit legacy format
-        // because the `.wps`/`.dps` extensions are not in its detection table.
         "wps" => office::read_wps(path),
         "dps" => office::read_dps(path),
-        // WPS Spreadsheets (.et) are BIFF-compatible; `open_workbook_auto`
-        // probes Xls/Xlsx readers when the extension is not in its known list.
         "xlsx" | "xlsm" | "et" => office::read_xlsx(path),
         "pptx" => office::read_pptx(path),
 
@@ -48,8 +46,5 @@ pub fn extract_text(path: &Path) -> Option<String> {
         "pdf" => office::read_pdf(path),
 
         _ => None,
-    })) {
-        Ok(out) => out,
-        Err(_) => None,
-    }
+    })
 }

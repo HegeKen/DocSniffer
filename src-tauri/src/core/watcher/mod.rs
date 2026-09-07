@@ -9,7 +9,6 @@ use crate::core::extractor::extract_text;
 use crate::core::indexer::IndexManager;
 use crate::core::scanner::FileEntry;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher as NotifyWatcher};
-use rayon::prelude::*;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
@@ -66,7 +65,7 @@ fn watcher_loop(rx: Receiver<notify::Result<notify::Event>>, index: Arc<IndexMan
 /// Re-index every path in the pending set (deleted files are removed).
 fn flush(paths: &HashSet<PathBuf>, index: &Arc<IndexManager>) {
     let list: Vec<&PathBuf> = paths.iter().collect();
-    list.par_iter().for_each(|p| {
+    for p in list {
         let p = p.as_path();
         if p.exists() {
             if let Some(fe) = entry_from_path(p) {
@@ -76,7 +75,7 @@ fn flush(paths: &HashSet<PathBuf>, index: &Arc<IndexManager>) {
         } else {
             let _ = index.delete_by_path(&p.to_string_lossy());
         }
-    });
+    }
     let _ = index.commit();
 }
 

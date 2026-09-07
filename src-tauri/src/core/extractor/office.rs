@@ -76,14 +76,22 @@ pub fn read_dps(path: &Path) -> Option<String> {
 /// `calamine`. `open_workbook_auto` probes Xls/Xlsx/Xlsb/Ods readers in turn
 /// when the `.et` extension is not in its known list.
 pub fn read_xlsx(path: &Path) -> Option<String> {
-    let mut workbook = calamine::open_workbook_auto(path).ok()?;
-    let sheets = workbook.sheet_names().to_vec();
-    if sheets.is_empty() {
-        return None;
-    }
-    let mut out = Vec::new();
-    for name in sheets {
-        if let Ok(range) = workbook.worksheet_range(&name) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut workbook = calamine::open_workbook_auto(path).ok()?;
+        let sheets = workbook.sheet_names().to_vec();
+        if sheets.is_empty() {
+            return None;
+        }
+        let mut out = Vec::new();
+        for name in sheets {
+            let range = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| workbook.worksheet_range(&name))) {
+                Ok(value) => match value {
+                    Ok(range) => range,
+                    Err(_) => continue,
+                },
+                Err(_) => continue,
+            };
+
             for row in range.rows() {
                 let line: Vec<String> = row.iter().map(|c| c.to_string()).collect();
                 if !line.is_empty() {
@@ -91,15 +99,27 @@ pub fn read_xlsx(path: &Path) -> Option<String> {
                 }
             }
         }
+        clean(out.join("\n"))
+    }));
+
+    match result {
+        Ok(text) => text,
+        Err(_) => None,
     }
-    clean(out.join("\n"))
 }
 
 /// Extract text from a PDF file.
 pub fn read_pdf(path: &Path) -> Option<String> {
-    match pdf_extract::extract_text(path) {
-        Ok(text) if !text.trim().is_empty() => Some(text),
-        _ => None,
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        match pdf_extract::extract_text(path) {
+            Ok(text) if !text.trim().is_empty() => Some(text),
+            _ => None,
+        }
+    }));
+
+    match result {
+        Ok(text) => text,
+        Err(_) => None,
     }
 }
 
