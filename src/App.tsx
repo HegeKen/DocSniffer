@@ -10,6 +10,7 @@ import ResultList from "./components/ResultList";
 import ScanControl from "./components/ScanControl";
 import RuleManager from "./components/RuleManager";
 import BatchManager from "./components/BatchManager";
+import ErrorBoundary from "./ErrorBoundary";
 import { SearchResult } from "./lib/api";
 import { searchFiles } from "./lib/api";
 
@@ -62,9 +63,14 @@ export default function App() {
         </div>
         <div className="status-chip">
           {status ? (
-            <>
-              已索引 <b>{status.documents.toLocaleString()}</b> 个文件 · {status.data_dir}
-            </>
+            <div className="status-chip-inner">
+              <div className="status-chip-count">
+                已索引 <b>{status.documents.toLocaleString()}</b> 个文件
+              </div>
+              <div className="status-chip-path" title={status.data_dir}>
+                {status.data_dir}
+              </div>
+            </div>
           ) : (
             "索引未就绪"
           )}
@@ -91,17 +97,21 @@ export default function App() {
       </nav>
 
       <main className="content">
-        {tab === "search" && (
-          <>
-            <SearchBar onSearch={runSearch} busy={busy} />
-            <ResultList results={results} query={lastQuery} />
-          </>
-        )}
-        {tab === "scan" && (
-          <ScanControl progress={progress} onDone={refreshStatus} />
-        )}
-        {tab === "rules" && <RuleManager />}
-        {tab === "index" && <BatchManager onChanged={refreshStatus} />}
+        {/* keyed by tab so a render crash in one panel is cleared the moment
+            the user switches to another tab, instead of wedging the whole app */}
+        <ErrorBoundary key={tab}>
+          {tab === "search" && (
+            <>
+              <SearchBar onSearch={runSearch} busy={busy} />
+              <ResultList results={results} query={lastQuery} />
+            </>
+          )}
+          {tab === "scan" && (
+            <ScanControl progress={progress} onDone={refreshStatus} />
+          )}
+          {tab === "rules" && <RuleManager />}
+          {tab === "index" && <BatchManager onChanged={refreshStatus} />}
+        </ErrorBoundary>
       </main>
     </div>
   );

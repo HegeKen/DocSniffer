@@ -10,6 +10,7 @@
 //! Tauri commands one-to-one (see `server/api.rs`).
 
 pub mod api;
+pub mod signal;
 
 use crate::core::state::AppState;
 use api::ServerContext;
@@ -17,6 +18,23 @@ use std::io::{Cursor, Read};
 use std::sync::Arc;
 use std::thread;
 use tiny_http::{Header, Method, Response, Server};
+
+/// Addresses that only accept connections from the local machine.
+const LOOPBACK_HOSTS: &[&str] = &["127.0.0.1", "localhost", "::1"];
+
+/// CSP delivered with every embedded-UI response. The UI is same-origin only,
+/// so no remote scripts/styles/connections are permitted.
+const CSP_HEADER: &str = concat!(
+    "default-src 'self'; ",
+    "script-src 'self'; ",
+    "style-src 'self' 'unsafe-inline'; ",
+    "img-src 'self' data: blob:; ",
+    "font-src 'self' data:; ",
+    "connect-src 'self'; ",
+    "object-src 'none'; ",
+    "base-uri 'self'; ",
+    "form-action 'none'"
+);
 
 /// Frontend assets from the repo-root `dist/` folder. In release builds the
 /// files are embedded at compile time; in debug builds rust-embed reads them
@@ -32,7 +50,13 @@ const MAX_BODY_BYTES: u64 = 32 * 1024 * 1024;
 pub fn run_cli() {
     let mut host = String::from("127.0.0.1");
     let mut port = DEFAULT_PORT;
-    let mut open = false;
+    // Auto-open the UI in the default browser after the server starts. This is
+    // the desired behaviour for the desktop-style server flow; pass --no-open
+    // when running headless (e.g. CI / remote).
+    let mut open = true;
+    // The API has no authentication, so non-loopback binds are refused unless
+    // the operator explicitly acknowledges the exposure with --allow-remote.
+    let mut allow_remote = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -45,7 +69,9 @@ pub fn run_cli() {
                 Some(h) => host = h,
                 None => die("--host expects an address (e.g. --host 127.0.0.1)"),
             },
+            "--allow-remote" => allow_remote = true,
             "--open" => open = true,
+            "--no-open" => open = false,
             "-h" | "--help" => {
                 print_usage();
                 return;
@@ -56,6 +82,14 @@ pub fn run_cli() {
                 std::process::exit(2);
             }
         }
+    }
+
+    if !LOOPBACK_HOSTS.contains(&host.as_str()) && !allow_remote {
+        die(&format!(
+            "refusing to bind non-loopback address '{host}': the API is unauthenticated.\n\
+             Use a loopback address (127.0.0.1 / localhost / ::1), or pass --allow-remote\n\
+             if you deliberately want to expose the API to the network (e.g. trusted LAN)."
+        ));
     }
 
     let state = match AppState::new() {
@@ -77,8 +111,10 @@ pub fn run_cli() {
     println!("  Listening on http://{addr}/");
     println!("  Data dir: {}", crate::core::resolve_data_dir().display());
     println!("  Press Ctrl+C to stop.");
-    if host != "127.0.0.1" && host != "localhost" {
-        println!("  WARNING: bound to a non-loopback address; the API is unauthenticated.");
+    if !LOOPBACK_HOSTS.contains(&host.as_str()) {
+        println!("  WARNING: --allow-remote enabled, bound to {host}.");
+        println!("  The API is unauthenticated: anyone reachable can scan files and");
+        println!("  delete the index. Only do this on a fully trusted network.");
     }
 
     if open {
@@ -97,20 +133,22 @@ pub fn run_cli() {
         });
     }
 
-    // Worker threads are detached; park the main thread forever.
-    loop {
-        thread::park();
-    }
+    // Worker threads are detached; block until SIGINT/SIGTERM (Unix) or a
+    // Windows console Ctrl event, then exit cleanly.
+    signal::wait_for_shutdown();
+    println!("\nShutdown signal received, stopping.");
 }
 
 fn print_usage() {
     println!("DocSniffer server mode (Windows 7 compatible)");
     println!();
     println!("Usage: docsniffer-server [options]");
-    println!("  --port <n>   Port to listen on (default {DEFAULT_PORT})");
-    println!("  --host <ip>  Bind address (default 127.0.0.1, local only)");
-    println!("  --open       Open the UI in the default browser on start");
-    println!("  -h, --help   Show this help");
+    println!("  --port <n>      Port to listen on (default {DEFAULT_PORT})");
+    println!("  --host <ip>     Bind address (default 127.0.0.1, local only)");
+    println!("  --allow-remote  Permit binding a non-loopback --host (unauthenticated!)");
+    println!("  --open          Open the UI in the default browser on start (default)");
+    println!("  --no-open       Do not auto-open the browser (headless mode)");
+    println!("  -h, --help      Show this help");
 }
 
 fn die(msg: &str) -> ! {
@@ -139,13 +177,11 @@ fn handle_request(mut request: tiny_http::Request, ctx: &ServerContext) {
             serde_json::Value::Null => b"null".to_vec(),
             other => other.to_string().into_bytes(),
         };
-        let mut resp = json_response(status, &payload);
-        add_cors(&mut resp);
-        resp
+        json_response(status, &payload)
     } else if method == Method::Options {
-        let mut resp = Response::from_data(Vec::new()).with_status_code(204);
-        add_cors(&mut resp);
-        resp
+        // Cross-origin preflight: no CORS headers are ever emitted, so the
+        // browser blocks the follow-up request. Return 204 without policy.
+        Response::from_data(Vec::new()).with_status_code(204)
     } else {
         serve_static(&path)
     };
@@ -160,16 +196,20 @@ fn json_response(status: u16, payload: &[u8]) -> Response<Cursor<Vec<u8>>> {
         .with_header(content_type)
 }
 
-fn add_cors(resp: &mut Response<Cursor<Vec<u8>>>) {
+/// Attach browser-side hardening headers to UI responses (strict CSP, no MIME
+/// sniffing, no framing).
+fn with_security_headers(mut resp: Response<Cursor<Vec<u8>>>) -> Response<Cursor<Vec<u8>>> {
     for (name, value) in [
-        ("Access-Control-Allow-Origin", "*"),
-        ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
-        ("Access-Control-Allow-Headers", "Content-Type"),
+        ("Content-Security-Policy", CSP_HEADER),
+        ("X-Content-Type-Options", "nosniff"),
+        ("X-Frame-Options", "DENY"),
+        ("Referrer-Policy", "no-referrer"),
     ] {
         if let Ok(h) = Header::from_bytes(name, value) {
             resp.add_header(h);
         }
     }
+    resp
 }
 
 /// Serve the embedded frontend. Extension-less unknown paths fall back to
@@ -190,7 +230,7 @@ fn serve_static(path: &str) -> Response<Cursor<Vec<u8>>> {
         Some(file) => {
             let mime = mime_of(rel);
             let header = Header::from_bytes("Content-Type", mime).unwrap();
-            Response::from_data(file.data.into_owned()).with_header(header)
+            with_security_headers(Response::from_data(file.data.into_owned()).with_header(header))
         }
         None => {
             // Fresh checkout without `pnpm build`: guide the user instead of a
@@ -199,9 +239,11 @@ fn serve_static(path: &str) -> Response<Cursor<Vec<u8>>> {
                         Run `pnpm install && pnpm build` in the repository root,\n\
                         then rebuild this binary (release builds embed dist/).\n";
             let header = Header::from_bytes("Content-Type", "text/plain; charset=utf-8").unwrap();
-            Response::from_data(hint.as_bytes().to_vec())
-                .with_status_code(404)
-                .with_header(header)
+            with_security_headers(
+                Response::from_data(hint.as_bytes().to_vec())
+                    .with_status_code(404)
+                    .with_header(header),
+            )
         }
     }
 }

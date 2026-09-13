@@ -5,7 +5,11 @@
 //! overrides are persisted in the portable-aware store and take precedence.
 
 use crate::core::storage::Store;
+use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 /// A single detection rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,16 +31,69 @@ pub struct RuleSet {
 }
 
 impl Rule {
+    /// Whether this rule should inspect the file content.
+    pub fn scans_content(&self) -> bool {
+        self.scope.iter().any(|s| s == "content")
+    }
+
+    /// Whether this rule should inspect the file name.
+    pub fn scans_filename(&self) -> bool {
+        self.scope.iter().any(|s| s == "filename" || s == "name")
+    }
+}
+
+/// Process-wide cache of compiled regexes, keyed by pattern text. Scanning a
+/// folder used to recompile every rule's pattern once *per file*; the
+/// automaton is now built once and cheaply `Clone`d (it is reference-counted
+/// internally).
+static RE_CACHE: Lazy<Mutex<HashMap<String, Regex>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// Compile (or fetch from cache) the regex for `pattern`.
+///
+/// Unlike the previous `Regex::new(...).ok()?`, an invalid pattern returns an
+/// explicit error so the UI can point at the broken rule instead of silently
+/// never matching.
+pub fn compile_regex(pattern: &str) -> Result<Regex, String> {
+    if let Some(re) = RE_CACHE
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(pattern)
+    {
+        return Ok(re.clone());
+    }
+    let re = Regex::new(pattern).map_err(|e| format!("正则表达式无效 `{pattern}`：{e}"))?;
+    RE_CACHE
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(pattern.to_string(), re.clone());
+    Ok(re)
+}
+
+/// A rule with its regex compiled once, ready to scan many files.
+pub struct CompiledRule {
+    pub rule: Rule,
+    /// `None` for keyword rules; `Some` for regex rules.
+    re: Option<Regex>,
+}
+
+impl CompiledRule {
+    /// Compile one rule, failing with a user-facing message for bad regexes.
+    pub fn compile(rule: Rule) -> Result<Self, String> {
+        let re = if rule.rule_type == "regex" {
+            Some(compile_regex(&rule.pattern)?)
+        } else {
+            None
+        };
+        Ok(Self { rule, re })
+    }
+
     /// Return the first fragment of `text` matched by this rule, if any.
     pub fn first_match(&self, text: &str) -> Option<String> {
-        match self.rule_type.as_str() {
-            "regex" => {
-                let re = regex::Regex::new(&self.pattern).ok()?;
-                re.find(text).map(|m| m.as_str().to_string())
-            }
+        match &self.re {
+            Some(re) => re.find(text).map(|m| m.as_str().to_string()),
             // keyword: pattern is a `|` separated list of literal keywords
-            _ => {
-                for kw in self.pattern.split('|') {
+            None => {
+                for kw in self.rule.pattern.split('|') {
                     let kw = kw.trim();
                     if !kw.is_empty() && text.contains(kw) {
                         return Some(kw.to_string());
@@ -47,15 +104,18 @@ impl Rule {
         }
     }
 
-    /// Whether this rule should inspect the file content.
     pub fn scans_content(&self) -> bool {
-        self.scope.iter().any(|s| s == "content")
+        self.rule.scans_content()
     }
 
-    /// Whether this rule should inspect the file name.
     pub fn scans_filename(&self) -> bool {
-        self.scope.iter().any(|s| s == "filename" || s == "name")
+        self.rule.scans_filename()
     }
+}
+
+/// Compile a full rule set; the first invalid regex aborts with its error.
+pub fn compile_rules(rules: Vec<Rule>) -> Result<Vec<CompiledRule>, String> {
+    rules.into_iter().map(CompiledRule::compile).collect()
 }
 
 /// Load rules for the current store: user overrides first, else embedded defaults.

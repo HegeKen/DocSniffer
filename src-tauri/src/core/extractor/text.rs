@@ -4,11 +4,23 @@
 //! which matters for legacy GBK-era Chinese documents found on intranet
 //! machines.
 
+use super::MAX_EXTRACT_BYTES;
+use std::io::Read;
 use std::path::Path;
 
 /// Read a text file, honouring BOMs and falling back to encoding detection.
 pub fn read_text(path: &Path) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
+    // Bound the read itself: metadata size and on-disk size can diverge (sparse
+    // files, races), and the caller's metadata gate must never be the only
+    // defence against an oversized file.
+    let file = std::fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    file.take(MAX_EXTRACT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_EXTRACT_BYTES {
+        return None;
+    }
     if bytes.is_empty() {
         return None;
     }

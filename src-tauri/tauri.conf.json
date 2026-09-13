@@ -1,14 +1,15 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DocSniffer",
-  "version": "0.1.0",
-  "identifier": "com.sec.docsniffer",
+  "version": "0.2.0",
+  "identifier": "cn.helilab.docsniffer",
   "mainBinaryName": "docsniffer",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
-    "frontendDist": "../dist"
+    "frontendDist": "../dist",
+    "features": ["tauri-app"]
   },
   "bundle": {
     "active": true,
@@ -46,14 +47,15 @@
         "title": "DocSniffer",
         "width": 1100,
         "height": 720,
-        "minWidth": 800,
-        "minHeight": 560,
+        "minWidth": 480,
+        "minHeight": 480,
         "resizable": true,
         "fullscreen": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'",
+      "devCsp": null
     }
   }
 }

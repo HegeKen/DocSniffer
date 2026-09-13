@@ -17,7 +17,7 @@ pub mod watcher;
 use std::path::PathBuf;
 
 /// Application identifier, used for the data-directory naming and storage keys.
-pub const APP_ID: &str = "com.sec.docsniffer";
+pub const APP_ID: &str = "cn.helilab.docsniffer";
 
 /// Resolve the application data directory.
 ///

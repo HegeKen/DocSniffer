@@ -112,13 +112,8 @@ fn extract_highlight_terms(raw: &str) -> Vec<String> {
     for ch in raw.chars() {
         if ch.is_alphanumeric() || (ch as u32) >= 0x2e80 {
             cur.push(ch.to_lowercase().next().unwrap_or(ch));
-        } else {
-            if !cur.is_empty() {
-                terms.push(std::mem::take(&mut cur));
-            }
-            if cur.is_empty() {
-                continue;
-            }
+        } else if !cur.is_empty() {
+            terms.push(std::mem::take(&mut cur));
         }
     }
     if !cur.is_empty() {

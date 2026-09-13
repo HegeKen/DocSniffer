@@ -4,7 +4,7 @@
 //! its extracted content against the active rules, and returns a flat `Hit`
 //! report that can be rendered and exported by the front-end.
 
-use super::rules::Rule;
+use super::rules::CompiledRule;
 use crate::core::extractor::extract_text;
 use crate::core::scanner::ScanOptions;
 use serde::Serialize;
@@ -28,8 +28,8 @@ pub struct Hit {
 }
 
 /// Scan every file under `root` against `rules` and return all hits.
-pub fn scan_dir(root: &Path, rules: &[Rule], include_content: bool) -> Vec<Hit> {
-    let files = crate::core::scanner::collect_files(root, &ScanOptions::default());
+pub fn scan_dir(root: &Path, rules: &[CompiledRule], include_content: bool) -> Vec<Hit> {
+    let (files, _warnings) = crate::core::scanner::collect_files(root, &ScanOptions::default());
     let mut hits = Vec::new();
 
     // Keep content extraction on one thread pool for speed; collections are
@@ -41,7 +41,13 @@ pub fn scan_dir(root: &Path, rules: &[Rule], include_content: bool) -> Vec<Hit> 
 }
 
 /// Scan one file and push any hits into `out`.
-pub fn scan_file(path: &str, name: &str, rules: &[Rule], include_content: bool, out: &mut Vec<Hit>) {
+pub fn scan_file(
+    path: &str,
+    name: &str,
+    rules: &[CompiledRule],
+    include_content: bool,
+    out: &mut Vec<Hit>,
+) {
     let meta = std::fs::metadata(path);
     let (size, mtime) = match &meta {
         Ok(m) => (
@@ -84,7 +90,7 @@ pub fn scan_file(path: &str, name: &str, rules: &[Rule], include_content: bool, 
 fn build_hit(
     path: &str,
     name: &str,
-    rule: &Rule,
+    rule: &CompiledRule,
     match_type: &str,
     matched: String,
     file_size: u64,
@@ -93,15 +99,28 @@ fn build_hit(
     Hit {
         path: path.to_string(),
         file_name: name.to_string(),
-        rule_id: rule.id.clone(),
-        rule_name: rule.name.clone(),
-        rule_type: rule.rule_type.clone(),
-        risk_level: rule.risk_level.clone(),
+        rule_id: rule.rule.id.clone(),
+        rule_name: rule.rule.name.clone(),
+        rule_type: rule.rule.rule_type.clone(),
+        risk_level: rule.rule.risk_level.clone(),
         match_type: match_type.to_string(),
         matched,
         file_size,
         mtime,
     }
+}
+
+/// Snap a byte index down to the nearest UTF-8 char boundary. Slicing a `&str`
+/// in the middle of a multi-byte character (e.g. CJK) panics, so every window
+/// edge must be snapped first.
+fn floor_char_boundary(s: &str, mut i: usize) -> usize {
+    if i >= s.len() {
+        return s.len();
+    }
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
 }
 
 /// Show a short window of text around `needle` for the report.
@@ -112,8 +131,9 @@ fn snippet_around(text: &str, needle: &str) -> String {
     let Some(pos) = lower.find(&n) else {
         return needle.to_string();
     };
-    let from = pos.saturating_sub(window / 2);
-    let mut s = text[from..text.len().min(pos + n.len() + window / 2)].to_string();
+    let from = floor_char_boundary(text, pos.saturating_sub(window / 2));
+    let to = floor_char_boundary(text, text.len().min(pos + n.len() + window / 2));
+    let mut s = text[from..to].to_string();
     if from > 0 {
         s = format!("…{}", s);
     }

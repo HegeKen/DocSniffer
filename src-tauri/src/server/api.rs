@@ -5,6 +5,7 @@
 
 use crate::core::batch::{self, BatchInfo};
 use crate::core::extractor::extract_text;
+use crate::core::scanner::walker::MAX_SCAN_WARNINGS;
 use crate::core::scanner::{collect_files, ScanOptions};
 use crate::core::searcher as searcher;
 use crate::core::sensitive::{self, Hit, Rule};
@@ -32,11 +33,20 @@ pub struct ScanJob {
     outcome: Mutex<Option<ScanOutcome>>,
 }
 
-/// Terminal state of a scan job, serialized as `{"ok": n}` / `{"err": "msg"}`.
+/// Result of a finished scan: indexed count plus non-fatal warnings
+/// (unreadable entries, failed documents) surfaced to the UI.
+#[derive(Clone, Serialize)]
+pub struct ScanReport {
+    pub indexed: i64,
+    pub warnings: Vec<String>,
+}
+
+/// Terminal state of a scan job, serialized as
+/// `{"ok": {"indexed": n, "warnings": [...]}}` / `{"err": "msg"}`.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanOutcome {
-    Ok(i64),
+    Ok(ScanReport),
     Err(String),
 }
 
@@ -203,7 +213,7 @@ fn start_scan(ctx: &ServerContext, body: &[u8]) -> (u16, Value) {
     // Same pipeline as the Tauri command: collect → extract → add → commit,
     // with progress published into the shared job slot instead of IPC events.
     std::thread::spawn(move || {
-        let files = collect_files(Path::new(&root), &ScanOptions::default());
+        let (files, mut warnings) = collect_files(Path::new(&root), &ScanOptions::default());
         job.set_total(files.len());
         let mut indexed = 0usize;
         for fe in &files {
@@ -212,12 +222,19 @@ fn start_scan(ctx: &ServerContext, body: &[u8]) -> (u16, Value) {
             } else {
                 None
             };
-            let _ = app.index.add_file(fe, content, &batch_id);
+            if let Err(e) = app.index.add_file(fe, content, &batch_id) {
+                if warnings.len() < MAX_SCAN_WARNINGS {
+                    warnings.push(format!("{}：索引失败（{e}）", fe.path));
+                }
+            }
             indexed += 1;
             job.set_progress(indexed, &fe.path);
         }
         let outcome = match app.index.commit() {
-            Ok(()) => ScanOutcome::Ok(indexed as i64),
+            Ok(()) => ScanOutcome::Ok(ScanReport {
+                indexed: indexed as i64,
+                warnings,
+            }),
             Err(e) => ScanOutcome::Err(e.to_string()),
         };
         // If the scan failed, drop the (now empty) batch metadata.
@@ -302,7 +319,7 @@ fn update_batch(ctx: &ServerContext, body: &[u8]) -> (u16, Value) {
         return err(400, format!("目录不存在: {}", batch.path));
     }
 
-    let files = collect_files(Path::new(&batch.path), &ScanOptions::default());
+    let (files, _warnings) = collect_files(Path::new(&batch.path), &ScanOptions::default());
     let op = || -> tantivy::Result<i64> {
         ctx.app.index.delete_by_batch(&req.batch_id)?;
         for fe in &files {
@@ -347,9 +364,14 @@ fn sensitive_scan(ctx: &ServerContext, body: &[u8]) -> (u16, Value) {
         Err(e) => return e,
     };
     let include_content = req.include_content.unwrap_or(true);
-    let rules = match req.active_rules {
-        Some(r) => r,
-        None => sensitive::load_rules(&ctx.app.store),
+    let raw_rules = req
+        .active_rules
+        .unwrap_or_else(|| sensitive::load_rules(&ctx.app.store));
+    // Invalid regexes are rejected here (HTTP 400) instead of silently
+    // disabling the rule deep inside the scan loop.
+    let rules = match sensitive::compile_rules(raw_rules) {
+        Ok(r) => r,
+        Err(e) => return err(400, e),
     };
     let p = Path::new(&req.path);
     let hits: Vec<Hit> = if p.is_dir() {

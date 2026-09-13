@@ -13,6 +13,7 @@ export default function ScanControl({ progress, onDone }: Props) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   const run = async () => {
     if (!path.trim()) {
@@ -22,9 +23,15 @@ export default function ScanControl({ progress, onDone }: Props) {
     setBusy(true);
     setError("");
     setMessage("");
+    setWarnings([]);
     try {
-      const count = await scanDirectory(path.trim(), includeContent, batchName.trim() || undefined);
-      setMessage(`扫描完成，共索引 ${count} 个文件。`);
+      const report = await scanDirectory(
+        path.trim(),
+        includeContent,
+        batchName.trim() || undefined,
+      );
+      setMessage(`扫描完成，共索引 ${report.indexed} 个文件。`);
+      setWarnings(report.warnings ?? []);
       onDone();
     } catch (e) {
       setError(String(e));
@@ -73,6 +80,17 @@ export default function ScanControl({ progress, onDone }: Props) {
 
       {error && <div className="error">{error}</div>}
       {message && <div className="ok">{message}</div>}
+      {warnings.length > 0 && (
+        <div className="warning">
+          <div>{warnings.length} 个条目被跳过或索引失败：</div>
+          <ul className="warning-list">
+            {warnings.slice(0, 10).map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+            {warnings.length > 10 && <li>…共 {warnings.length} 条，仅显示前 10 条</li>}
+          </ul>
+        </div>
+      )}
 
       {progress && (
         <div className="progress-wrap">

@@ -1,7 +1,9 @@
 //! Sensitive-information commands: rule management + scanning.
 
 use crate::commands::AppState;
-use crate::core::sensitive::{load_rules, save_rules as save_rules_store, scan_dir, Hit, Rule};
+use crate::core::sensitive::{
+    compile_rules, load_rules, save_rules as save_rules_store, scan_dir, Hit, Rule,
+};
 use std::path::Path;
 use tauri::State;
 
@@ -26,10 +28,12 @@ pub async fn sensitive_scan(
     active_rules: Option<Vec<Rule>>,
 ) -> Result<Vec<Hit>, String> {
     let include_content = include_content.unwrap_or(true);
-    let rules = match active_rules {
+    // Compile before blocking: an invalid regex fails fast with a message the
+    // UI can show instead of silently never matching.
+    let rules = compile_rules(match active_rules {
         Some(r) => r,
         None => load_rules(&state.store),
-    };
+    })?;
     let handle = tauri::async_runtime::spawn_blocking(move || {
         let p = Path::new(&path);
         let hits = if p.is_dir() {

@@ -1,6 +1,6 @@
 [package]
 name = "docsniffer"
-version = "0.1.0"
+version = "0.2.0"
 description = "DocSniffer - Enterprise file content scanning and sensitive data discovery tool"
 authors = ["Security Dept"]
 edition = "2021"
@@ -63,6 +63,15 @@ percent-encoding = "2"
 # Embed default resources (default_rules.json)
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 office_oxide = "0.1.9"
+
+# Graceful shutdown signals for the headless server. Both crates are already
+# in the dependency graph; windows-sys is pinned to 0.52 to match notify and
+# stay compatible with the Windows 7 build-std target.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Console"] }
 
 [profile.release]
 codegen-units = 1

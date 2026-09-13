@@ -1,7 +1,7 @@
 {
   "name": "docsniffer",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "build:win7": "pnpm build && powershell -ExecutionPolicy Bypass -File scripts\\build-win7.ps1",
-    "build:fresh": "cd src-tauri && cargo clean && cd .. && pnpm build && pnpm tauri build"
+    "build:gui": "pnpm build && pnpm tauri build -- --features tauri-app",
+    "build:server": "pnpm build && cd src-tauri && cargo build --release --no-default-features --bin docsniffer-server",
+    "build:fresh": "cd src-tauri && cargo clean && cd .. && pnpm build && pnpm tauri build -- --features tauri-app"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

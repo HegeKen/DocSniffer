@@ -6,5 +6,7 @@
 pub mod rules;
 pub mod scanner;
 
-pub use rules::{load_rules, save_rules, Rule, RuleSet};
+pub use rules::{
+    compile_regex, compile_rules, load_rules, save_rules, CompiledRule, Rule, RuleSet,
+};
 pub use scanner::{scan_dir, scan_file, Hit};

@@ -4,16 +4,33 @@
 //! strip markup and decode common entities. XLSX uses `calamine` for a robust
 //! cell-text walk. PDF uses `pdf-extract`.
 
+use super::MAX_EXTRACT_BYTES;
 use calamine::Reader;
+use once_cell::sync::Lazy;
+use regex::Regex;
 use std::io::Read;
 use std::path::Path;
+
+/// Read one ZIP entry as UTF-8, bounding the *decompressed* size so a
+/// high-compression zip bomb cannot exhaust memory even when the archive file
+/// itself is tiny. Returns `None` when the cap is exceeded.
+fn read_zip_entry<R: Read>(entry: &mut R) -> Option<String> {
+    let mut xml = String::new();
+    entry
+        .take(MAX_EXTRACT_BYTES + 1)
+        .read_to_string(&mut xml)
+        .ok()?;
+    if xml.len() as u64 > MAX_EXTRACT_BYTES {
+        return None;
+    }
+    Some(xml)
+}
 
 /// Extract text from a DOCX (Word) file.
 pub fn read_docx(path: &Path) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
     let mut archive = zip::ZipArchive::new(file).ok()?;
-    let mut xml = String::new();
-    archive.by_name("word/document.xml").ok()?.read_to_string(&mut xml).ok()?;
+    let xml = read_zip_entry(&mut archive.by_name("word/document.xml").ok()?)?;
     clean(xml)
 }
 
@@ -22,14 +39,18 @@ pub fn read_pptx(path: &Path) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
     let mut archive = zip::ZipArchive::new(file).ok()?;
     let names: Vec<String> = archive.file_names().map(|s| s.to_string()).collect();
+    let mut total = 0u64;
     let mut chunks = Vec::new();
     for name in names {
         if !name.starts_with("ppt/slides/slide") || !name.ends_with(".xml") {
             continue;
         }
-        let mut xml = String::new();
         if let Ok(mut f) = archive.by_name(&name) {
-            if f.read_to_string(&mut xml).is_ok() {
+            if let Some(xml) = read_zip_entry(&mut f) {
+                total += xml.len() as u64;
+                if total > MAX_EXTRACT_BYTES {
+                    return None;
+                }
                 chunks.push(xml);
             }
         }
@@ -123,6 +144,10 @@ pub fn read_pdf(path: &Path) -> Option<String> {
     }
 }
 
+/// Compiled once and shared by every document extraction (this used to be
+/// recompiled on every call, which dominated scans of document-heavy folders).
+static TAG_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"<[^>]+>").unwrap());
+
 /// Strip XML markup, translate paragraph boundaries to newlines and decode the
 /// handful of XML/HTML entities that appear in Office files.
 fn clean(xml: String) -> Option<String> {
@@ -134,8 +159,7 @@ fn clean(xml: String) -> Option<String> {
     s = s.replace("</w:tr>", "\n").replace("</a:tr>", "\n");
 
     // Remove tags but keep their inner text.
-    let tag_re = regex::Regex::new(r"<[^>]+>").unwrap();
-    let s = tag_re.replace_all(&s, "");
+    let s = TAG_RE.replace_all(&s, "");
 
     let s = s
         .replace("&lt;", "<")

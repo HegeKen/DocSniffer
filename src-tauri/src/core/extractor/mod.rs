@@ -11,12 +11,24 @@ pub mod text;
 
 use std::path::Path;
 
+/// Maximum decoded text size extracted from a single file. Files larger than
+/// this are still indexed by metadata, but their content is skipped — a single
+/// multi-gigabyte log (or a zip bomb) must never be read fully into memory.
+pub const MAX_EXTRACT_BYTES: u64 = 50 * 1024 * 1024;
+
 /// Extract searchable plain text from `path` based on its extension.
 ///
-/// Returns `None` when the format is unsupported or extraction fails; the
-/// caller simply indexes the file without a content field in that case.
+/// Returns `None` when the format is unsupported, extraction fails, or the
+/// file exceeds [`MAX_EXTRACT_BYTES`]; the caller simply indexes the file
+/// without a content field in that case.
 pub fn extract_text(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?.to_lowercase();
+
+    // Cheap metadata gate before any parser touches the file.
+    let size = std::fs::metadata(path).ok()?.len();
+    if size > MAX_EXTRACT_BYTES {
+        return None;
+    }
 
     // Extraction crates may panic on malformed / legacy / encoding-heavy docs
     // (e.g. PDFs with a `UniGB-UCS2-H` CMap or damaged XLS files). The panic

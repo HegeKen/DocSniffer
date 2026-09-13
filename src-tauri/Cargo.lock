@@ -860,13 +860,14 @@ dependencies = [
 
 [[package]]
 name = "docsniffer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "calamine",
  "chardetng",
  "chrono",
  "dirs",
  "encoding_rs",
+ "libc",
  "notify",
  "office_oxide",
  "once_cell",
@@ -883,6 +884,7 @@ dependencies = [
  "tauri-build",
  "tiny_http",
  "walkdir",
+ "windows-sys 0.52.0",
  "zip 2.4.2",
 ]
 

@@ -9,6 +9,7 @@
 use crate::core::storage::Store;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Storage key holding the `Vec<BatchInfo>` list.
 pub const STORE_KEY: &str = "batches";
@@ -42,6 +43,9 @@ pub fn save_all(store: &Store, batches: &[BatchInfo]) -> Result<(), String> {
 
 /// Append a batch and keep the list sorted newest first.
 pub fn add(store: &Store, batch: BatchInfo) -> Result<(), String> {
+    // Read/modify/write must be atomic: concurrent scans otherwise lose each
+    // other's freshly appended batch metadata.
+    let _g = store.lock_write();
     let mut list = load_all(store);
     list.push(batch);
     list.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -50,6 +54,7 @@ pub fn add(store: &Store, batch: BatchInfo) -> Result<(), String> {
 
 /// Remove a batch by id. Returns whether a batch was actually removed.
 pub fn remove(store: &Store, id: &str) -> bool {
+    let _g = store.lock_write();
     let mut list = load_all(store);
     let before = list.len();
     list.retain(|b| b.id != id);
@@ -62,6 +67,7 @@ pub fn remove(store: &Store, id: &str) -> bool {
 
 /// Drop all batch metadata (used by the "clear all index" action).
 pub fn clear(store: &Store) {
+    let _g = store.lock_write();
     store.remove(STORE_KEY);
 }
 
@@ -73,9 +79,19 @@ pub fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-/// Generate a unique batch id from the current timestamp.
+/// Process-wide monotonic sequence mixed into batch ids so two scans started
+/// within the same millisecond cannot collide (a collision would merge their
+/// documents, including on delete).
+static ID_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Generate a unique batch id from the nanosecond timestamp + a sequence.
 pub fn new_id() -> String {
-    format!("batch-{}", now_millis())
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let seq = ID_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("batch-{nanos:x}-{:04x}", seq & 0xffff)
 }
 
 /// Derive a human-readable default batch name from the scanned path.

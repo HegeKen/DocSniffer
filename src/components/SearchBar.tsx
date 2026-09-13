@@ -30,7 +30,7 @@ export default function SearchBar({ onSearch, busy }: Props) {
         title="在此索引（导入批次）范围内搜索"
       >
         <option value="">全部索引</option>
-        {batches.map((b) => (
+        {(batches ?? []).map((b) => (
           <option key={b.id} value={b.id}>
             {b.name}（{b.documents.toLocaleString()} 个文档）
           </option>

@@ -20,6 +20,12 @@ export interface ScanProgress {
   path: string;
 }
 
+/** Result of a finished scan (mirrors Rust `ScanReport`). */
+export interface ScanReport {
+  indexed: number;
+  warnings: string[];
+}
+
 export interface IndexStatus {
   documents: number;
   data_dir: string;
@@ -75,10 +81,11 @@ async function httpJson<T>(method: "GET" | "POST", url: string, body?: unknown):
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   let payload: unknown = null;
+  let parseError: string | null = null;
   try {
     payload = await res.json();
-  } catch {
-    // non-JSON error page
+  } catch (e) {
+    parseError = String(e);
   }
   if (!res.ok) {
     const msg =
@@ -86,6 +93,12 @@ async function httpJson<T>(method: "GET" | "POST", url: string, body?: unknown):
         ? String((payload as { error: unknown }).error)
         : `请求失败 (HTTP ${res.status})`;
     throw new Error(msg);
+  }
+  if (parseError !== null) {
+    throw new Error(`响应不是有效 JSON (HTTP ${res.status}): ${parseError}`);
+  }
+  if (payload === null || payload === undefined) {
+    throw new Error("响应体为空");
   }
   return payload as T;
 }
@@ -99,9 +112,9 @@ export const scanDirectory = (
   path: string,
   includeContent: boolean,
   batchName?: string,
-): Promise<number> =>
+): Promise<ScanReport> =>
   inTauri()
-    ? invoke<number>("scan_directory", { path, includeContent, batchName })
+    ? invoke<ScanReport>("scan_directory", { path, includeContent, batchName })
     : startScanHttp(path, includeContent, batchName);
 
 export const indexStatus = (): Promise<IndexStatus> =>
@@ -184,7 +197,7 @@ interface ScanStatusHttp {
   indexed: number;
   total: number;
   path: string;
-  outcome: { ok?: number; err?: string } | null;
+  outcome: { ok?: ScanReport; err?: string } | null;
 }
 
 const SCAN_POLL_MS = 300;
@@ -193,7 +206,7 @@ async function startScanHttp(
   path: string,
   includeContent: boolean,
   batchName?: string,
-): Promise<number> {
+): Promise<ScanReport> {
   await httpPost("/api/scan_directory", {
     path,
     include_content: includeContent,
@@ -212,7 +225,7 @@ async function startScanHttp(
     progressSubs.forEach((cb) => cb(progress));
     if (!s.running && s.outcome) {
       if (s.outcome.err !== undefined) throw new Error(s.outcome.err);
-      return s.outcome.ok ?? 0;
+      return s.outcome.ok ?? { indexed: 0, warnings: [] };
     }
     if (!s.running && !s.outcome) {
       // Outcome not published yet; give up eventually in case the server was

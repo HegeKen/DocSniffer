@@ -5,6 +5,7 @@
 use crate::commands::AppState;
 use crate::core::batch::{self, BatchInfo};
 use crate::core::extractor::extract_text;
+use crate::core::scanner::walker::MAX_SCAN_WARNINGS;
 use crate::core::scanner::{collect_files, ScanOptions};
 use serde::Serialize;
 use std::path::Path;
@@ -18,9 +19,18 @@ struct ScanProgress {
     path: String,
 }
 
+/// Terminal result of a scan: files indexed plus non-fatal warnings about
+/// entries that could not be traversed or indexed.
+#[derive(Clone, Serialize)]
+pub struct ScanReport {
+    pub indexed: i64,
+    pub warnings: Vec<String>,
+}
+
 /// Scan `path` and add every file to the index under a new import batch.
-/// Returns the number of files indexed. An optional `batch_name` labels the
-/// batch; when omitted a name is derived from the directory and timestamp.
+/// Returns the number of files indexed and any non-fatal warnings. An optional
+/// `batch_name` labels the batch; when omitted a name is derived from the
+/// directory and timestamp.
 #[tauri::command]
 pub async fn scan_directory(
     app: AppHandle,
@@ -28,7 +38,7 @@ pub async fn scan_directory(
     path: String,
     include_content: bool,
     batch_name: Option<String>,
-) -> Result<i64, String> {
+) -> Result<ScanReport, String> {
     if !Path::new(&path).is_dir() {
         return Err(format!("不是有效目录: {path}"));
     }
@@ -43,9 +53,9 @@ pub async fn scan_directory(
 
     let index = state.index.clone();
     let scan_batch = batch_id.clone();
-    let handle = tauri::async_runtime::spawn_blocking(move || -> Result<i64, String> {
+    let handle = tauri::async_runtime::spawn_blocking(move || -> Result<ScanReport, String> {
         let root = Path::new(&path);
-        let files = collect_files(root, &ScanOptions::default());
+        let (files, mut warnings) = collect_files(root, &ScanOptions::default());
         let total = files.len();
         let mut indexed = 0usize;
 
@@ -55,7 +65,11 @@ pub async fn scan_directory(
             } else {
                 None
             };
-            let _ = index.add_file(fe, content, &scan_batch);
+            if let Err(e) = index.add_file(fe, content, &scan_batch) {
+                if warnings.len() < MAX_SCAN_WARNINGS {
+                    warnings.push(format!("{}：索引失败（{e}）", fe.path));
+                }
+            }
             indexed += 1;
 
             if indexed % 200 == 0 || indexed == total {
@@ -70,12 +84,15 @@ pub async fn scan_directory(
             }
         }
 
-        let _ = index.commit();
-        Ok(indexed as i64)
+        index.commit().map_err(|e| e.to_string())?;
+        Ok(ScanReport {
+            indexed: indexed as i64,
+            warnings,
+        })
     });
 
     match handle.await.map_err(|e| e.to_string())? {
-        Ok(n) => Ok(n),
+        Ok(report) => Ok(report),
         Err(e) => {
             // Scan failed: drop the (now empty) batch metadata we added above.
             batch::remove(&state.store, &batch_id);
@@ -183,7 +200,7 @@ pub async fn update_batch(state: State<'_, AppState>, batch_id: String) -> Resul
     }
     let index = state.index.clone();
     let res = tauri::async_runtime::spawn_blocking(move || -> Result<i64, String> {
-        let files = collect_files(Path::new(&path), &ScanOptions::default());
+        let (files, _warnings) = collect_files(Path::new(&path), &ScanOptions::default());
         index.delete_by_batch(&batch_id).map_err(|e| e.to_string())?;
         for fe in &files {
             let content = extract_text(Path::new(&fe.path));
