@@ -1,6 +1,6 @@
 [package]
 name = "docsniffer"
-version = "0.2.0"
+version = "0.3.0"
 description = "DocSniffer - Enterprise file content scanning and sensitive data discovery tool"
 authors = ["Security Dept"]
 edition = "2021"
@@ -9,24 +9,17 @@ rust-version = "1.77"
 # The single-file / green portable binary is achieved by:
 #  - default `cargo build --release` (no bundler, see README)
 #  - static linking is enabled via `.cargo/config.toml` (crt-static on windows)
-# rlib is all the desktop app and the server bin need; avoiding staticlib/cdylib
-# skips pointless DLL/static-lib links (mobile is not a target of this project).
+# rlib is all the desktop app needs; avoiding staticlib/cdylib skips pointless
+# DLL/static-lib links (mobile is not a target of this project).
 [lib]
 name = "docsniffer_lib"
 crate-type = ["rlib"]
 
-# `tauri-app` (default): desktop GUI build via Tauri 2 — Windows 10+ / macOS / Linux.
-# `--no-default-features`: headless server build (`docsniffer-server`), which has no
-# GUI/WebView dependency and is the build path for Windows 7 support.
-[features]
-default = ["tauri-app"]
-tauri-app = ["dep:tauri", "dep:tauri-build"]
-
 [build-dependencies]
-tauri-build = { version = "2", features = [], optional = true }
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [], optional = true }
+tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -35,16 +28,11 @@ tantivy = "0.22"
 
 # File system
 walkdir = "2"
-# dirs 6 / notify 7 pin windows-sys >= 0.52; the older windows-sys 0.48 import
-# lib (windows.0.48.5.lib) broke linking for the win7 build-std target.
 dirs = "6"
 notify = "7"
 
 # Concurrency
 rayon = "1"
-
-# Headless server mode (docsniffer-server): local HTTP API + embedded web UI
-tiny_http = "0.12"
 
 # Content extraction
 regex = "1"
@@ -58,20 +46,10 @@ pdf-extract = "0.8"
 sha2 = "0.10"
 once_cell = "1"
 chrono = "0.4"
-percent-encoding = "2"
 
 # Embed default resources (default_rules.json)
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 office_oxide = "0.1.9"
-
-# Graceful shutdown signals for the headless server. Both crates are already
-# in the dependency graph; windows-sys is pinned to 0.52 to match notify and
-# stay compatible with the Windows 7 build-std target.
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Console"] }
 
 [profile.release]
 codegen-units = 1

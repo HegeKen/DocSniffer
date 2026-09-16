@@ -1,7 +1,7 @@
 //! Shared application state.
 //!
-//! Plain Rust state with no framework dependency, so both the Tauri command
-//! layer and the headless HTTP server (`docsniffer-server`) can own it.
+//! Plain Rust state with no framework dependency, owned by the Tauri command
+//! layer (`commands/`).
 
 use crate::core::indexer::IndexManager;
 use crate::core::storage::Store;

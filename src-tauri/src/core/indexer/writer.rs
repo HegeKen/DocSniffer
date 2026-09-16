@@ -12,7 +12,7 @@ use std::sync::Mutex;
 use tantivy::collector::{Count, TopDocs};
 use tantivy::query::{Query, QueryParser, TermQuery};
 use tantivy::schema::{IndexRecordOption, Schema, Value};
-use tantivy::tokenizer::{BoxTokenStream, Token, TokenStream, Tokenizer};
+use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 use tantivy::{Index, IndexReader, IndexWriter, TantivyDocument, Term};
 
 /// A unigram, CJK-aware tokenizer (see module docs).
@@ -20,87 +20,92 @@ use tantivy::{Index, IndexReader, IndexWriter, TantivyDocument, Term};
 pub struct CjkTokenizer;
 
 impl Tokenizer for CjkTokenizer {
-    type TokenStream<'a> = BoxTokenStream<'a>;
+    type TokenStream<'a> = CjkTokenStream<'a>;
 
     fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
-        BoxTokenStream::new(CjkTokenStream {
-            tokens: tokenize_cjk(text),
-            idx: 0,
-        })
+        CjkTokenStream {
+            text,
+            byte_idx: 0,
+            position: 0,
+            token: Token {
+                offset_from: 0,
+                offset_to: 0,
+                position: 0,
+                position_length: 1,
+                text: String::new(),
+            },
+        }
     }
 }
 
-struct CjkTokenStream {
-    tokens: Vec<Token>,
-    idx: usize,
+/// Streaming tokenizer state.
+///
+/// IMPORTANT: this must NOT materialise the whole token vector up front. An
+/// earlier implementation built `Vec<Token>` with one heap-allocated `String`
+/// per CJK character, so a 50MB Chinese document (~17M chars) needed roughly
+/// 1.5GB just for tokens — a guaranteed OOM on big files. Here exactly one
+/// `Token` exists at a time and its `text`
+/// buffer is reused across advances.
+pub struct CjkTokenStream<'a> {
+    text: &'a str,
+    byte_idx: usize,
+    position: usize,
+    token: Token,
 }
 
-impl TokenStream for CjkTokenStream {
+impl TokenStream for CjkTokenStream<'_> {
     fn advance(&mut self) -> bool {
-        if self.idx < self.tokens.len() {
-            self.idx += 1;
-            true
-        } else {
-            false
+        let bytes = self.text.as_bytes();
+        while self.byte_idx < bytes.len() {
+            let ch = self.text[self.byte_idx..].chars().next().unwrap();
+            let len = ch.len_utf8();
+
+            if ch.is_ascii_alphanumeric() {
+                let start = self.byte_idx;
+                let mut j = self.byte_idx + len;
+                while j < bytes.len() {
+                    let c2 = self.text[j..].chars().next().unwrap();
+                    if c2.is_ascii_alphanumeric() {
+                        j += c2.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+                self.emit(start, j, bytes[start..j].iter().map(|b| b.to_ascii_lowercase() as char));
+                self.byte_idx = j;
+                return true;
+            } else if (ch as u32) >= 0x2e80 && !ch.is_whitespace() {
+                let start = self.byte_idx;
+                self.emit(start, start + len, ch.to_lowercase());
+                self.byte_idx += len;
+                return true;
+            } else {
+                self.byte_idx += len;
+            }
         }
+        false
     }
 
     fn token(&self) -> &Token {
-        &self.tokens[self.idx - 1]
+        &self.token
     }
 
     fn token_mut(&mut self) -> &mut Token {
-        &mut self.tokens[self.idx - 1]
+        &mut self.token
     }
 }
 
-/// Produce a token vector: runs of ASCII alphanumerics, and each non-ASCII
-/// ideographic character as a separate token.
-fn tokenize_cjk(text: &str) -> Vec<Token> {
-    let mut tokens = Vec::new();
-    let mut position = 0usize;
-    let mut i = 0usize;
-    let bytes = text.as_bytes();
-
-    while i < bytes.len() {
-        let ch = text[i..].chars().next().unwrap();
-        let len = ch.len_utf8();
-
-        if ch.is_ascii_alphanumeric() {
-            let start = i;
-            let mut j = i + len;
-            while j < bytes.len() {
-                let c2 = text[j..].chars().next().unwrap();
-                if c2.is_ascii_alphanumeric() {
-                    j += c2.len_utf8();
-                } else {
-                    break;
-                }
-            }
-            tokens.push(Token {
-                offset_from: start,
-                offset_to: j,
-                position,
-                position_length: 1,
-                text: text[start..j].to_lowercase(),
-            });
-            position += 1;
-            i = j;
-        } else if (ch as u32) >= 0x2e80 && !ch.is_whitespace() {
-            tokens.push(Token {
-                offset_from: i,
-                offset_to: i + len,
-                position,
-                position_length: 1,
-                text: ch.to_lowercase().to_string(),
-            });
-            position += 1;
-            i += len;
-        } else {
-            i += len;
-        }
+impl CjkTokenStream<'_> {
+    /// Refill the single reusable token for the byte range `[from, to)`.
+    fn emit(&mut self, from: usize, to: usize, lowercased: impl Iterator<Item = char>) {
+        self.token.offset_from = from;
+        self.token.offset_to = to;
+        self.token.position = self.position;
+        self.token.position_length = 1;
+        self.token.text.clear();
+        self.token.text.extend(lowercased);
+        self.position += 1;
     }
-    tokens
 }
 
 /// A stable document id derived from the file path (used for dedup / deletes).
@@ -114,6 +119,26 @@ pub fn id_of(path: &str) -> String {
 /// Batch id assigned to documents that were never part of an explicit import
 /// batch (e.g. legacy docs re-indexed by the file watcher).
 const DEFAULT_BATCH: &str = "default";
+
+/// Maximum number of characters of file content sent to the indexer for one
+/// document. The extractor may return up to 50MB of text (~17M Chinese chars);
+/// tokenising and building position postings for all of it can transiently
+/// need hundreds of MB per *single* document. Content beyond this cap is
+/// skipped (the file is still fully indexed by metadata), which bounds peak
+/// indexing memory regardless of input file size. 2M chars ≈ 6MB of CJK text.
+const MAX_INDEX_CHARS: usize = 2_000_000;
+
+/// Tantivy writer indexing heap. Segments are flushed when this arena fills,
+/// so it also bounds the in-memory index size.
+const WRITER_HEAP_BYTES: usize = 64_000_000;
+
+/// Truncate `text` to [`MAX_INDEX_CHARS`] on a UTF-8 boundary.
+fn truncate_indexed(text: &str) -> &str {
+    match text.char_indices().nth(MAX_INDEX_CHARS) {
+        Some((byte_idx, _)) => &text[..byte_idx],
+        None => text,
+    }
+}
 
 /// Owns the Tantivy index, its writer and the schema/field handles.
 pub struct IndexManager {
@@ -139,7 +164,7 @@ impl IndexManager {
         };
         index.tokenizers().register(TOKENIZER_ZH, CjkTokenizer);
 
-        let writer = index.writer(150_000_000)?;
+        let writer = index.writer(WRITER_HEAP_BYTES)?;
         Ok(Self {
             index,
             writer: Mutex::new(writer),
@@ -177,7 +202,7 @@ impl IndexManager {
         doc.add_text(self.fields.path, fe.path.clone());
         doc.add_text(self.fields.name, fe.name.clone());
         if let Some(text) = content {
-            doc.add_text(self.fields.content, text);
+            doc.add_text(self.fields.content, truncate_indexed(&text));
         }
         doc.add_text(self.fields.ext, fe.ext.clone());
         doc.add_text(self.fields.batch_id, batch_id.to_string());

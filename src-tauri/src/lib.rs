@@ -1,17 +1,12 @@
 //! DocSniffer library entry-point.
 //!
-//! Two front-ends share the same core:
-//! - the Tauri 2 desktop app (`run`, requires the `tauri-app` feature), and
-//! - the headless HTTP server (`server`, used for the Windows 7 build).
+//! The Tauri 2 desktop app (`run`) drives the shared core over IPC commands
+//! (`commands/`).
 
-pub mod core;
-pub mod server;
-
-#[cfg(feature = "tauri-app")]
 pub mod commands;
+pub mod core;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-#[cfg(feature = "tauri-app")]
 pub fn run() {
     use commands::AppState;
 

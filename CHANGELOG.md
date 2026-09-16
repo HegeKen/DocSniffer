@@ -4,6 +4,20 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.0] - 2026-09-16
+
+### 修复
+
+- **扫描/建索引频繁内存溢出（OOM）**：根因是自定义 CJK 分词器在分词前为整个文档预生成 `Vec<Token>`，且每个汉字对应一个独立堆分配的 `String`——实测 40MB 中文文件（约 1400 万字符）仅分词阶段峰值即达约 897MB，叠加 Tantivy 内存后扫描大文件或中文密集目录时频繁 OOM（32 位 Windows 7 构建尤其严重）。现改为**流式分词**（全程仅保留一个可复用 Token，峰值降为常数级）；实测 40MB 中文 + 30MB 英文全链路扫描峰值约 169MB。
+- **单文档索引内容上限**：单个文件送入索引器的内容按 UTF-8 边界截断至 200 万字符（约 6MB 中文），超出部分仅不建全文索引（文件仍按元数据索引），与分词器改造共同保证任意单个文件的索引内存占用有确定上界。
+- **压缩文档解压放大防护**：DOCX/PPTX/XLSX 在解析前先依据 ZIP 中央目录汇总解压后总大小，超过 100MB 直接跳过（防 zip bomb）；PDF 与 WPS OLE 旧格式（`.wps`/`.dps`）的文件大小闸门收紧至 20MB；XLSX 文本累积设 50MB 上限，不再因 `calamine` 整表驻留 + 二次拼接成倍放大内存。
+- **索引写入堆预算下调**：Tantivy writer 堆预算由 150MB 降至 64MB，降低 32 位 Windows 7 构建的地址空间压力（段刷盘更频繁但单段更小）。
+
+### 移除
+
+- **移除 Windows 7 及以下系统的支持**：Win7 用户的替代方案已由 [DocSnifferLegacy](https://github.com/HegeKen/DocSnifferLegacy) 项目承接并上线，本仓库不再维护 Win7 构建链路（删除 `scripts/build-win7.ps1`、`x86_64-win7-windows-msvc` 构建方式及相关文档），最低系统要求回归 Windows 10（1803 及以上）。
+- **移除服务器模式（`docsniffer-server`）**：该模式原为 Win7 支持途径，随 Win7 支持一并移除——删除无头 HTTP 服务（`server/` 模块、`tiny_http` 等依赖）与 `--no-default-features` 无头构建；前端 `api.ts` 移除 HTTP 双通道适配，仅保留 Tauri IPC。
+
 ## [0.2.0] - 2026-09-13
 
 ### 新增
@@ -66,5 +80,6 @@
 - Win7 构建链接问题修复与 crate 类型优化（`c2e392d`，2026-09-05）；新增 Win7 构建脚本 `scripts/build-win7.ps1`。
 - 包管理器迁移至 pnpm，移除 `package-lock.json`（`f6fb6bb`，2026-09-07）。
 
-[0.2.0]: https://github.com/HegeKen/DocSniffer/compare/v0.1.0...v0.2.0
+[0.3.0]: https://github.com/HegeKen/DocSniffer/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/HegeKen/DocSniffer/releases/tag/v0.2.0
 [0.1.0]: https://github.com/HegeKen/DocSniffer/releases/tag/v0.1.0
