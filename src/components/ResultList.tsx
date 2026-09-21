@@ -1,4 +1,5 @@
-import { SearchResult } from "../lib/api";
+import { useState } from "react";
+import { openPath, SearchResult } from "../lib/api";
 
 interface Props {
   results: SearchResult[];
@@ -18,6 +19,17 @@ function fmtDate(secs: number): string {
 }
 
 export default function ResultList({ results, query }: Props) {
+  const [error, setError] = useState("");
+
+  const openWithDefaultApp = async (result: SearchResult) => {
+    try {
+      await openPath(result.path);
+      setError("");
+    } catch (e) {
+      setError(`打开失败：${e}`);
+    }
+  };
+
   if (!query) {
     return <div className="empty">输入关键词开始搜索。</div>;
   }
@@ -28,8 +40,15 @@ export default function ResultList({ results, query }: Props) {
   return (
     <div className="result-list">
       <div className="result-meta">共 {results.length} 条结果</div>
+      {error && <div className="error">{error}</div>}
       {results.map((r) => (
-        <div className="result-item" key={r.id}>
+        <div
+          className="result-item clickable"
+          key={r.id}
+          role="button"
+          title={`点击用默认程序打开：${r.path}`}
+          onClick={() => openWithDefaultApp(r)}
+        >
           <div className="result-title">
             <span className="result-name">{r.name}</span>
             <span className="result-ext">.{r.ext}</span>

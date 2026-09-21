@@ -114,6 +114,9 @@ export const openIndexDir = (): Promise<string> => invoke<string>("open_index_di
 export const setIndexDir = (dir: string): Promise<IndexMoveReport> =>
   invoke<IndexMoveReport>("set_index_dir", { dir });
 
+/** Open `path` with the OS default application (folders open in the file manager). */
+export const openPath = (path: string): Promise<void> => invoke<void>("open_path", { path });
+
 // ---- Events ----
 
 export const onScanProgress = (cb: (p: ScanProgress) => void): Promise<() => void> =>

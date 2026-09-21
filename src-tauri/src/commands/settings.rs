@@ -1,9 +1,11 @@
-//! Index-location commands.
+//! Index-location commands plus the OS file-manager / default-application
+//! integration they share with the search UI.
 //!
 //! The index lives in `<data_dir>/index` by default; the user may move it to a
 //! custom directory ("索引存储位置"). Moving migrates the existing index data
 //! and persists the new location in the `Store`, so it survives a restart.
-//! `open_index_dir` reveals the active directory in the OS file manager.
+//! `open_index_dir` reveals the active directory in the OS file manager, and
+//! `open_path` hands a single file over to its default application.
 
 use crate::commands::AppState;
 use crate::core::indexer::IndexManager;
@@ -23,8 +25,19 @@ pub struct IndexMoveReport {
 #[tauri::command]
 pub fn open_index_dir(state: State<'_, AppState>) -> Result<String, String> {
     let dir = state.index_dir();
-    reveal_in_file_manager(&dir)?;
+    shell_open(&dir)?;
     Ok(dir.to_string_lossy().into_owned())
+}
+
+/// Open `path` with the OS default application: a document in its associated
+/// program, a directory in the file manager.
+#[tauri::command]
+pub fn open_path(path: String) -> Result<(), String> {
+    let path = PathBuf::from(path.trim());
+    if !path.exists() {
+        return Err(format!("文件不存在：{}", path.display()));
+    }
+    shell_open(&path)
 }
 
 /// Move the index to `dir` — migrating the existing index data — and switch to
@@ -121,18 +134,25 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Open `dir` in the OS file manager.
-fn reveal_in_file_manager(dir: &Path) -> Result<(), String> {
+/// Hand `path` to the OS: macOS `open`, Windows `start`, Linux `xdg-open`.
+/// Directories land in the file manager, files in their default application.
+fn shell_open(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
-    let program = "explorer";
+    let mut command = {
+        // `start` reads the first quoted argument as the window title, so an
+        // empty one has to precede the path.
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/C", "start", ""]);
+        command
+    };
     #[cfg(target_os = "macos")]
-    let program = "open";
+    let mut command = std::process::Command::new("open");
     #[cfg(all(unix, not(target_os = "macos")))]
-    let program = "xdg-open";
+    let mut command = std::process::Command::new("xdg-open");
 
-    std::process::Command::new(program)
-        .arg(dir)
+    command
+        .arg(path)
         .spawn()
         .map(|_| ())
-        .map_err(|e| format!("无法打开目录 {}：{e}", dir.display()))
+        .map_err(|e| format!("无法打开 {}：{e}", path.display()))
 }

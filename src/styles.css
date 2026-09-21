@@ -213,6 +213,18 @@ body {
   padding: 12px 14px;
 }
 
+.result-item.clickable {
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.result-item.clickable:hover {
+  border-color: var(--primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
 .result-title {
   display: flex;
   align-items: baseline;

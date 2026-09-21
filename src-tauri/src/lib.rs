@@ -27,6 +27,7 @@ pub fn run() {
             commands::sensitive::save_rules,
             commands::sensitive::sensitive_scan,
             commands::settings::open_index_dir,
+            commands::settings::open_path,
             commands::settings::set_index_dir,
         ])
         .run(tauri::generate_context!())

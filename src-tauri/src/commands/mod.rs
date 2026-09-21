@@ -16,4 +16,4 @@ pub use scan::{
 };
 pub use search::search_files;
 pub use sensitive::{get_rules, save_rules, sensitive_scan};
-pub use settings::{open_index_dir, set_index_dir};
+pub use settings::{open_index_dir, open_path, set_index_dir};
