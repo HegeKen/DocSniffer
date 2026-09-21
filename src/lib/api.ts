@@ -28,7 +28,13 @@ export interface ScanReport {
 
 export interface IndexStatus {
   documents: number;
-  data_dir: string;
+  index_dir: string;
+}
+
+/** Result of moving the index to a custom directory (mirrors Rust `IndexMoveReport`). */
+export interface IndexMoveReport {
+  index_dir: string;
+  documents: number;
 }
 
 export interface BatchItem {
@@ -100,6 +106,13 @@ export const clearAllIndex = (): Promise<void> => invoke<void>("clear_all_index"
 
 export const updateBatch = (batchId: string): Promise<number> =>
   invoke<number>("update_batch", { batchId });
+
+/** Reveal the active index directory in the system file manager. */
+export const openIndexDir = (): Promise<string> => invoke<string>("open_index_dir");
+
+/** Move the index to `dir`, migrating the existing index data. */
+export const setIndexDir = (dir: string): Promise<IndexMoveReport> =>
+  invoke<IndexMoveReport>("set_index_dir", { dir });
 
 // ---- Events ----
 

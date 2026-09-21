@@ -174,6 +174,12 @@ impl IndexManager {
         })
     }
 
+    /// The directory this index lives in (authoritative, even after the user
+    /// moves the index to a custom location).
+    pub fn dir(&self) -> &Path {
+        &self.index_dir
+    }
+
     /// Re-create the index directory if it has been deleted while the app was
     /// running (e.g. the user removed `DocSniffer/index` by hand). Tantivy
     /// needs the directory to exist before it can write temp files or commit.

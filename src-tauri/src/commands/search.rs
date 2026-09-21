@@ -13,7 +13,7 @@ pub async fn search_files(
     limit: Option<usize>,
     batch_id: Option<String>,
 ) -> Result<Vec<SearchResult>, String> {
-    let index = state.index.clone();
+    let index = state.index();
     let limit = limit.unwrap_or(200);
     let handle = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<SearchResult>, String> {
         let results = search(&index, &query, limit, batch_id.as_deref())

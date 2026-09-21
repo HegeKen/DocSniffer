@@ -4,6 +4,23 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.0] - 2026-09-22
+
+### 新增
+
+- **索引存储位置可自定义并支持迁移**：「索引管理」页新增「索引存储位置」区块，可查看当前索引目录、在系统资源管理器中打开，或选择新目录并把现有索引迁移过去（`set_index_dir`：刷盘 → 递归复制 → 打开新索引 → 热替换 → 清理旧目录 → 持久化位置）。位置保存在本地存储的 `index_dir` 键，重启后自动沿用；索引不再固定于数据目录下的 `index`。
+- **首页索引目录可点击打开**：状态栏中的索引目录路径变为可点击项，点击后在系统资源管理器中定位该目录（`open_index_dir`；macOS 使用 `open`、Windows 使用 `explorer`、Linux 使用 `xdg-open`）。
+
+### 变更
+
+- **「索引管理」更名为「设置」**：标签与页面标题统一为「设置」，索引批次管理与索引存储位置收纳于此。
+- **索引句柄支持热替换**：`AppState` 中的索引改由 `RwLock<Arc<IndexManager>>` 持有，迁移后无需重启即可切换到新目录；`index_status` 返回的 `index_dir` 改为真实索引目录而非数据目录。
+- **新增依赖 `tauri-plugin-dialog`**：用于原生文件选择与确认弹窗，能力声明相应增加 `dialog:default`。
+
+### 修复
+
+- **索引批次「删除」「更新」点击无反应**：二者使用 `window.confirm` 做二次确认，而 macOS 上的 `wry 0.55.1` 未实现 `webView:runJavaScriptConfirmPanelWithMessage:initiatedByFrame:completionHandler:`，`confirm()` 静默返回 `false` 且不弹窗，处理逻辑随即提前返回。现改用 `tauri-plugin-dialog` 的原生 `ask()` 弹窗，删除、更新与「一键清除全部索引」的确认流程均恢复正常。
+
 ## [0.3.0] - 2026-09-16
 
 ### 修复

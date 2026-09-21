@@ -6,6 +6,7 @@
 pub mod scan;
 pub mod search;
 pub mod sensitive;
+pub mod settings;
 
 pub use crate::core::state::AppState;
 
@@ -15,3 +16,4 @@ pub use scan::{
 };
 pub use search::search_files;
 pub use sensitive::{get_rules, save_rules, sensitive_scan};
+pub use settings::{open_index_dir, set_index_dir};

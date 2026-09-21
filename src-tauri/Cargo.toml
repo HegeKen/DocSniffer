@@ -1,6 +1,6 @@
 [package]
 name = "docsniffer"
-version = "0.3.0"
+version = "0.4.0"
 description = "DocSniffer - Enterprise file content scanning and sensitive data discovery tool"
 authors = ["Security Dept"]
 edition = "2021"
@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

@@ -3,6 +3,7 @@ import {
   IndexStatus,
   indexStatus,
   onScanProgress,
+  openIndexDir,
   ScanProgress,
 } from "./lib/api";
 import SearchBar from "./components/SearchBar";
@@ -31,6 +32,14 @@ export default function App() {
       setStatus(null);
     }
   }, []);
+
+  const revealIndexDir = async () => {
+    try {
+      await openIndexDir();
+    } catch (e) {
+      console.error("open index dir failed", e);
+    }
+  };
 
   useEffect(() => {
     refreshStatus();
@@ -67,8 +76,13 @@ export default function App() {
               <div className="status-chip-count">
                 已索引 <b>{status.documents.toLocaleString()}</b> 个文件
               </div>
-              <div className="status-chip-path" title={status.data_dir}>
-                {status.data_dir}
+              <div
+                className="status-chip-path clickable"
+                title={`点击在资源管理器中打开：${status.index_dir}`}
+                role="button"
+                onClick={revealIndexDir}
+              >
+                {status.index_dir}
               </div>
             </div>
           ) : (
@@ -83,7 +97,7 @@ export default function App() {
             ["search", "搜索"],
             ["scan", "扫描"],
             ["rules", "敏感检测"],
-            ["index", "索引管理"],
+            ["index", "设置"],
           ] as [Tab, string][]
         ).map(([k, label]) => (
           <button

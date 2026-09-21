@@ -94,6 +94,16 @@ body {
   text-overflow: ellipsis;
 }
 
+.status-chip-path.clickable {
+  cursor: pointer;
+}
+
+.status-chip-path.clickable:hover {
+  color: var(--primary);
+  opacity: 1;
+  text-decoration: underline;
+}
+
 .tabs {
   display: flex;
   gap: 8px;
@@ -247,6 +257,29 @@ body {
 .panel h2 {
   font-size: 16px;
   margin: 4px 0 14px;
+}
+
+.settings-block {
+  margin-bottom: 26px;
+}
+
+.settings-block h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+
+.settings-path {
+  font-size: 13px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fafbfc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .form-row {

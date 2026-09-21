@@ -51,7 +51,7 @@ pub async fn scan_directory(
     };
     batch::add(&state.store, batch)?;
 
-    let index = state.index.clone();
+    let index = state.index();
     let scan_batch = batch_id.clone();
     let handle = tauri::async_runtime::spawn_blocking(move || -> Result<ScanReport, String> {
         let root = Path::new(&path);
@@ -101,17 +101,18 @@ pub async fn scan_directory(
     }
 }
 
-/// Return a coarse index status (document count + data directory).
+/// Return a coarse index status (document count + index directory).
 #[tauri::command]
 pub async fn index_status(state: State<'_, AppState>) -> Result<IndexStatus, String> {
-    let index = state.index.clone();
+    let index = state.index();
+    let index_dir = index.dir().to_string_lossy().into_owned();
     let status = tauri::async_runtime::spawn_blocking(move || {
         let reader = index.reader().map_err(|e| e.to_string())?;
         let searcher = reader.searcher();
         let count = searcher.num_docs();
         Ok(IndexStatus {
             documents: count,
-            data_dir: crate::core::resolve_data_dir().to_string_lossy().into_owned(),
+            index_dir,
         })
     });
     status.await.map_err(|e| e.to_string())?
@@ -120,7 +121,7 @@ pub async fn index_status(state: State<'_, AppState>) -> Result<IndexStatus, Str
 #[derive(Serialize)]
 pub struct IndexStatus {
     pub documents: u64,
-    pub data_dir: String,
+    pub index_dir: String,
 }
 
 /// A batch plus its live document count (computed from the index).
@@ -137,7 +138,7 @@ pub struct BatchItem {
 #[tauri::command]
 pub async fn list_batches(state: State<'_, AppState>) -> Result<Vec<BatchItem>, String> {
     let batches = batch::load_all(&state.store);
-    let index = state.index.clone();
+    let index = state.index();
     tauri::async_runtime::spawn_blocking(move || {
         let mut out = Vec::with_capacity(batches.len());
         for b in batches {
@@ -160,7 +161,7 @@ pub async fn list_batches(state: State<'_, AppState>) -> Result<Vec<BatchItem>, 
 /// documents removed.
 #[tauri::command]
 pub async fn delete_batch(state: State<'_, AppState>, batch_id: String) -> Result<i64, String> {
-    let index = state.index.clone();
+    let index = state.index();
     let id = batch_id.clone();
     let deleted = tauri::async_runtime::spawn_blocking(move || -> Result<i64, String> {
         let count = index.count_by_batch(&id).unwrap_or(0) as i64;
@@ -178,7 +179,7 @@ pub async fn delete_batch(state: State<'_, AppState>, batch_id: String) -> Resul
 /// Clear the entire index (all batches) and forget all batch metadata.
 #[tauri::command]
 pub async fn clear_all_index(state: State<'_, AppState>) -> Result<(), String> {
-    let index = state.index.clone();
+    let index = state.index();
     let res = tauri::async_runtime::spawn_blocking(move || index.clear())
         .await
         .map_err(|e| e.to_string())?;
@@ -198,7 +199,7 @@ pub async fn update_batch(state: State<'_, AppState>, batch_id: String) -> Resul
     if !Path::new(&path).is_dir() {
         return Err(format!("目录不存在: {path}"));
     }
-    let index = state.index.clone();
+    let index = state.index();
     let res = tauri::async_runtime::spawn_blocking(move || -> Result<i64, String> {
         let (files, _warnings) = collect_files(Path::new(&path), &ScanOptions::default());
         index.delete_by_batch(&batch_id).map_err(|e| e.to_string())?;

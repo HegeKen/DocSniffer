@@ -14,10 +14,14 @@ pub mod state;
 pub mod storage;
 pub mod watcher;
 
+use crate::core::storage::Store;
 use std::path::PathBuf;
 
 /// Application identifier, used for the data-directory naming and storage keys.
 pub const APP_ID: &str = "cn.helilab.docsniffer";
+
+/// `Store` key holding the user-configured index directory (if any).
+pub const INDEX_DIR_KEY: &str = "index_dir";
 
 /// Resolve the application data directory.
 ///
@@ -43,4 +47,18 @@ pub fn resolve_data_dir() -> PathBuf {
     let data_dir = base.join("DocSniffer");
     let _ = std::fs::create_dir_all(&data_dir);
     data_dir
+}
+
+/// Resolve where the Tantivy index lives.
+///
+/// A location chosen by the user on the settings page (`INDEX_DIR_KEY`) wins;
+/// otherwise the index lives in `<data_dir>/index`.
+pub fn resolve_index_dir(store: &Store) -> PathBuf {
+    if let Some(custom) = store.load::<String>(INDEX_DIR_KEY) {
+        let trimmed = custom.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    resolve_data_dir().join("index")
 }
